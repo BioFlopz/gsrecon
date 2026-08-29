@@ -1,6 +1,9 @@
 
 #include <Windows.h>
+#include <vulkan/vulkan.h>
+#include "vulkan_context.hpp"
 
+#include <vector>
 
 LRESULT CALLBACK WindowProc(
     HWND hwnd,
@@ -56,6 +59,17 @@ int WINAPI wWinMain(
 	}
 
 	ShowWindow(window, nCmdShow);
+
+	VulkanContext vulkan;
+
+	if (!vulkan.init(hInstance, window))
+	{
+	    return 0;
+	}
+
+
+
+
 
 	MSG message{};
 
