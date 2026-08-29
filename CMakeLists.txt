@@ -7,5 +7,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(
     gsrecon
+    WIN32
     src/main.cpp
+)
+
+target_compile_definitions(
+    gsrecon
+    PRIVATE
+    UNICODE
+    _UNICODE
 )
