@@ -22,6 +22,7 @@ target_compile_definitions(
     UNICODE
     _UNICODE
     VK_USE_PLATFORM_WIN32_KHR
+    $<$<CONFIG:Debug>:GSRECON_ENABLE_VALIDATION>
 )
 
 target_link_libraries(
