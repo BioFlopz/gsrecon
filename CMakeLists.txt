@@ -14,6 +14,8 @@ add_executable(
     src/main.cpp
     src/vulkan_context.cpp
     src/vulkan_context.hpp
+    src/vulkan_swapchain.cpp
+    src/vulkan_swapchain.hpp
 )
 
 target_compile_definitions(
