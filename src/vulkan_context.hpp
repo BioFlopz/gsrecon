@@ -41,6 +41,16 @@ public:
     {
         return presentQueueFamily_;
     }
+
+    VkQueue graphicsQueue() const
+    {
+        return graphicsQueue_;
+    }
+
+    VkQueue presentQueue() const
+    {
+        return presentQueue_;
+    }
     
     const std::array<uint8_t, VK_UUID_SIZE>& deviceUUID() const
     {
