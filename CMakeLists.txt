@@ -16,6 +16,8 @@ add_executable(
     src/vulkan_context.hpp
     src/vulkan_swapchain.cpp
     src/vulkan_swapchain.hpp
+    src/vulkan_frame.cpp
+    src/vulkan_frame.hpp
 )
 
 target_compile_definitions(

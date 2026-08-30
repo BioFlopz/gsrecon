@@ -44,6 +44,11 @@ public:
         return extent_;
     }
 
+    VkSemaphore renderFinishedSemaphore(uint32_t imageIndex) const
+    {
+        return renderFinishedSemaphores_[imageIndex];
+    }
+
 
 
 private:
@@ -55,6 +60,8 @@ private:
 
     VkFormat imageFormat_ = VK_FORMAT_UNDEFINED;
     VkExtent2D extent_{};
+
+    std::vector<VkSemaphore> renderFinishedSemaphores_;
 
 
     void cleanup();

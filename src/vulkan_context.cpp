@@ -480,6 +480,7 @@ void VulkanContext::cleanup()
 {
     if (device_ != VK_NULL_HANDLE)
     {
+        vkDeviceWaitIdle(device_);
         vkDestroyDevice(device_, nullptr);
         device_ = VK_NULL_HANDLE;
     }

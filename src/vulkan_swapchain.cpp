@@ -124,14 +124,8 @@ VkCompositeAlphaFlagBitsKHR chooseCompositeAlpha(VkCompositeAlphaFlagsKHR suppor
 
 
 
-bool VulkanSwapchain::init(
-    VkPhysicalDevice physicalDevice,
-    VkDevice device,
-    VkSurfaceKHR surface,
-    uint32_t graphicsQueueFamily,
-    uint32_t presentQueueFamily,
-    uint32_t width,
-    uint32_t height)
+bool VulkanSwapchain::init(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
+    uint32_t graphicsQueueFamily, uint32_t presentQueueFamily,uint32_t width, uint32_t height)
 {
     if (swapchain_ != VK_NULL_HANDLE ||
         physicalDevice == VK_NULL_HANDLE ||
@@ -266,11 +260,46 @@ bool VulkanSwapchain::init(
 	    imageViews.push_back(imageView);
 	}
 
+    std::vector<VkSemaphore> renderFinishedSemaphores;
+    renderFinishedSemaphores.reserve(images.size());
+
+    VkSemaphoreCreateInfo semaphoreInfo{};
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    for (size_t i = 0; i < images.size(); ++i)
+    {
+        VkSemaphore semaphore = VK_NULL_HANDLE;
+
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore) != VK_SUCCESS)
+        {
+            // Destroy any semaphores we already created.
+            for (VkSemaphore createdSemaphore : renderFinishedSemaphores)
+            {
+                vkDestroySemaphore(device, createdSemaphore, nullptr);
+            }
+
+            // Destroy image views created earlier.
+            for (VkImageView imageView : imageViews)
+            {
+                vkDestroyImageView(device, imageView, nullptr);
+            }
+
+            // Destroy the temporary swapchain.
+            vkDestroySwapchainKHR(device, swapchain, nullptr);
+
+            return false;
+        }
+
+        renderFinishedSemaphores.push_back(semaphore);
+    }
+
 	device_ = device;
 	swapchain_ = swapchain;
 
 	images_ = std::move(images);
 	imageViews_ = std::move(imageViews);
+
+    renderFinishedSemaphores_ = std::move(renderFinishedSemaphores);
 
 	imageFormat_ = surfaceFormat.format;
 	extent_ = extent;
@@ -293,6 +322,14 @@ void VulkanSwapchain::cleanup()
 
     imageViews_.clear();
     images_.clear();
+
+    for (VkSemaphore semaphore :
+         renderFinishedSemaphores_)
+    {
+        vkDestroySemaphore(device_, semaphore, nullptr);
+    }
+
+    renderFinishedSemaphores_.clear();
 
     if (swapchain_ != VK_NULL_HANDLE)
     {
