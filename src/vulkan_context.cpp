@@ -2,6 +2,88 @@
 #include <vector>
 #include <cstring>
 
+
+
+
+namespace
+{
+
+constexpr const char* kValidationLayer = "VK_LAYER_KHRONOS_validation";
+
+bool validationLayerAvailable()
+{
+    uint32_t layerCount = 0;
+
+    if (vkEnumerateInstanceLayerProperties(
+            &layerCount,
+            nullptr) != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    std::vector<VkLayerProperties> layers(layerCount);
+
+    if (vkEnumerateInstanceLayerProperties(
+            &layerCount,
+            layers.data()) != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    for (const auto& layer : layers)
+    {
+        if (std::strcmp(
+                layer.layerName,
+                kValidationLayer) == 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT,
+    VkDebugUtilsMessageTypeFlagsEXT,
+    const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
+    void*)
+{
+    if (callbackData != nullptr &&
+        callbackData->pMessage != nullptr)
+    {
+        OutputDebugStringA("[Vulkan] ");
+        OutputDebugStringA(callbackData->pMessage);
+        OutputDebugStringA("\n");
+    }
+
+    return VK_FALSE;
+}
+
+VkDebugUtilsMessengerCreateInfoEXT makeDebugMessengerInfo()
+{
+    VkDebugUtilsMessengerCreateInfoEXT info{};
+    info.sType =
+        VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+
+    info.messageSeverity =
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+
+    info.messageType =
+        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+
+    info.pfnUserCallback = debugCallback;
+
+    return info;
+}
+
+} // namespace
+
+
+
 struct QueueFamilyIndices
 {
     uint32_t graphics = UINT32_MAX;
@@ -69,25 +151,15 @@ bool supportsRequiredDeviceExtensions(VkPhysicalDevice device)
     return true;
 }
 
-QueueFamilyIndices findQueueFamilies(
-    VkPhysicalDevice device,
-    VkSurfaceKHR surface)
+QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface)
 {
     uint32_t count = 0;
 
-    vkGetPhysicalDeviceQueueFamilyProperties(
-        device,
-        &count,
-        nullptr
-    );
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
 
     std::vector<VkQueueFamilyProperties> families(count);
 
-    vkGetPhysicalDeviceQueueFamilyProperties(
-        device,
-        &count,
-        families.data()
-    );
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families.data());
 
     QueueFamilyIndices indices{};
 
@@ -138,62 +210,75 @@ bool VulkanContext::init(HINSTANCE hInstance, HWND window)
     appInfo.engineVersion = VK_MAKE_VERSION(0, 1, 0);
     appInfo.apiVersion = VK_API_VERSION_1_4;
 
-    const char* instanceExtensions[] = {
+    std::vector<const char*> instanceExtensions = {
         VK_KHR_SURFACE_EXTENSION_NAME,
         VK_KHR_WIN32_SURFACE_EXTENSION_NAME
     };
 
+#ifdef GSRECON_ENABLE_VALIDATION
+        instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+#endif
+
     VkInstanceCreateInfo instanceInfo{};
     instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instanceInfo.pApplicationInfo = &appInfo;
-    instanceInfo.enabledExtensionCount = 2;
-    instanceInfo.ppEnabledExtensionNames = instanceExtensions;
+    instanceInfo.enabledExtensionCount = static_cast<uint32_t>(instanceExtensions.size());
 
-    if (vkCreateInstance(
-            &instanceInfo,
-            nullptr,
-            &instance_) != VK_SUCCESS)
+    instanceInfo.ppEnabledExtensionNames = instanceExtensions.data();
+
+#ifdef GSRECON_ENABLE_VALIDATION
+
+        if (!validationLayerAvailable())
+        {
+            return false;
+        }
+
+        instanceInfo.enabledLayerCount = 1;
+        instanceInfo.ppEnabledLayerNames = &kValidationLayer;
+
+        VkDebugUtilsMessengerCreateInfoEXT debugInfo = makeDebugMessengerInfo();
+
+        instanceInfo.pNext = &debugInfo;
+
+#endif
+
+    if (vkCreateInstance(&instanceInfo, nullptr, &instance_) != VK_SUCCESS)
     {
         return false;
     }
 
+#ifdef GSRECON_ENABLE_VALIDATION
+
+    auto createDebugMessenger = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance_, "vkCreateDebugUtilsMessengerEXT"));
+
+    if (createDebugMessenger == nullptr || createDebugMessenger(instance_, &debugInfo, nullptr, &debugMessenger_) != VK_SUCCESS)
+    {
+        cleanup();
+        return false;
+    }
+
+#endif
+
     VkWin32SurfaceCreateInfoKHR surfaceInfo{};
-    surfaceInfo.sType =
-        VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+    surfaceInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
     surfaceInfo.hinstance = hInstance;
     surfaceInfo.hwnd = window;
 
-    if (vkCreateWin32SurfaceKHR(
-            instance_,
-            &surfaceInfo,
-            nullptr,
-            &surface_) != VK_SUCCESS)
+    if (vkCreateWin32SurfaceKHR(instance_, &surfaceInfo, nullptr, &surface_) != VK_SUCCESS)
     {
-        vkDestroyInstance(instance_, nullptr);
-        instance_ = VK_NULL_HANDLE;
-
+        cleanup();
         return false;
     }
 
     if (!selectPhysicalDevice())
     {
-        vkDestroySurfaceKHR(instance_, surface_, nullptr);
-        surface_ = VK_NULL_HANDLE;
-
-        vkDestroyInstance(instance_, nullptr);
-        instance_ = VK_NULL_HANDLE;
-
+        cleanup();
         return false;
     }
 
     if (!createLogicalDevice())
     {
-        vkDestroySurfaceKHR(instance_, surface_, nullptr);
-        surface_ = VK_NULL_HANDLE;
-
-        vkDestroyInstance(instance_, nullptr);
-        instance_ = VK_NULL_HANDLE;
-
+        cleanup();
         return false;
     }
 
@@ -231,21 +316,14 @@ bool VulkanContext::selectPhysicalDevice()
 {
     uint32_t deviceCount = 0;
 
-    if (vkEnumeratePhysicalDevices(
-            instance_,
-            &deviceCount,
-            nullptr) != VK_SUCCESS ||
-        deviceCount == 0)
+    if (vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr) != VK_SUCCESS || deviceCount == 0)
     {
         return false;
     }
 
     std::vector<VkPhysicalDevice> devices(deviceCount);
 
-    if (vkEnumeratePhysicalDevices(
-            instance_,
-            &deviceCount,
-            devices.data()) != VK_SUCCESS)
+    if (vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data()) != VK_SUCCESS)
     {
         return false;
     }
@@ -334,24 +412,15 @@ bool VulkanContext::selectPhysicalDevice()
     }
 
     VkPhysicalDeviceIDProperties idProperties{};
-    idProperties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+    idProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
 
     VkPhysicalDeviceProperties2 properties{};
-    properties.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     properties.pNext = &idProperties;
 
-    vkGetPhysicalDeviceProperties2(
-        physicalDevice_,
-        &properties
-    );
+    vkGetPhysicalDeviceProperties2(physicalDevice_, &properties);
 
-    std::memcpy(
-        deviceUUID_.data(),
-        idProperties.deviceUUID,
-        VK_UUID_SIZE
-    );
+    std::memcpy(deviceUUID_.data(), idProperties.deviceUUID, VK_UUID_SIZE);
 
     return true;
 }
@@ -367,39 +436,31 @@ bool VulkanContext::createLogicalDevice()
     std::vector<VkDeviceQueueCreateInfo> queueInfos;
 
     VkDeviceQueueCreateInfo graphicsQueueInfo{};
-    graphicsQueueInfo.sType =
-        VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    graphicsQueueInfo.queueFamilyIndex =
-        graphicsQueueFamily_;
+    graphicsQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    graphicsQueueInfo.queueFamilyIndex = graphicsQueueFamily_;
     graphicsQueueInfo.queueCount = 1;
-    graphicsQueueInfo.pQueuePriorities =
-        &queuePriority;
+    graphicsQueueInfo.pQueuePriorities = &queuePriority;
 
     queueInfos.push_back(graphicsQueueInfo);
 
     if (presentQueueFamily_ != graphicsQueueFamily_)
     {
         VkDeviceQueueCreateInfo presentQueueInfo{};
-        presentQueueInfo.sType =
-            VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        presentQueueInfo.queueFamilyIndex =
-            presentQueueFamily_;
+        presentQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        presentQueueInfo.queueFamilyIndex = presentQueueFamily_;
         presentQueueInfo.queueCount = 1;
-        presentQueueInfo.pQueuePriorities =
-            &queuePriority;
+        presentQueueInfo.pQueuePriorities = &queuePriority;
 
         queueInfos.push_back(presentQueueInfo);
     }
 
     VkPhysicalDeviceVulkan13Features features13{};
-    features13.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
 
     VkPhysicalDeviceVulkan12Features features12{};
-    features12.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     features12.pNext = &features13;
     features12.timelineSemaphore = VK_TRUE;
 
@@ -410,65 +471,67 @@ bool VulkanContext::createLogicalDevice()
     };
 
     VkDeviceCreateInfo deviceInfo{};
-    deviceInfo.sType =
-        VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceInfo.pNext = &features12;
-    deviceInfo.queueCreateInfoCount =
-        static_cast<uint32_t>(queueInfos.size());
-    deviceInfo.pQueueCreateInfos =
-        queueInfos.data();
+    deviceInfo.queueCreateInfoCount = static_cast<uint32_t>(queueInfos.size());
+    deviceInfo.pQueueCreateInfos = queueInfos.data();
     deviceInfo.enabledExtensionCount = 3;
-    deviceInfo.ppEnabledExtensionNames =
-        deviceExtensions;
+    deviceInfo.ppEnabledExtensionNames = deviceExtensions;
 
-    if (vkCreateDevice(
-            physicalDevice_,
-            &deviceInfo,
-            nullptr,
-            &device_) != VK_SUCCESS)
+    if (vkCreateDevice(physicalDevice_, &deviceInfo, nullptr, &device_) != VK_SUCCESS)
     {
         return false;
     }
 
-    vkGetDeviceQueue(
-        device_,
-        graphicsQueueFamily_,
-        0,
-        &graphicsQueue_
-    );
+    vkGetDeviceQueue(device_, graphicsQueueFamily_, 0, &graphicsQueue_);
 
-    vkGetDeviceQueue(
-        device_,
-        presentQueueFamily_,
-        0,
-        &presentQueue_
-    );
+    vkGetDeviceQueue(device_, presentQueueFamily_, 0, &presentQueue_);
 
     return true;
 }
 
 
-VulkanContext::~VulkanContext()
+
+void VulkanContext::cleanup()
 {
     if (device_ != VK_NULL_HANDLE)
     {
         vkDestroyDevice(device_, nullptr);
+        device_ = VK_NULL_HANDLE;
     }
 
     if (surface_ != VK_NULL_HANDLE)
     {
-        vkDestroySurfaceKHR(
-            instance_,
-            surface_,
-            nullptr
-        );
+        vkDestroySurfaceKHR(instance_, surface_, nullptr);
+
+        surface_ = VK_NULL_HANDLE;
     }
+
+#ifdef GSRECON_ENABLE_VALIDATION
+
+    if (debugMessenger_ != VK_NULL_HANDLE)
+    {
+        auto destroyDebugMessenger = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT"));
+
+        if (destroyDebugMessenger != nullptr)
+        {
+            destroyDebugMessenger(instance_, debugMessenger_, nullptr);
+        }
+
+        debugMessenger_ = VK_NULL_HANDLE;
+    }
+
+#endif
 
     if (instance_ != VK_NULL_HANDLE)
     {
-        vkDestroyInstance(
-            instance_,
-            nullptr
-        );
+        vkDestroyInstance(instance_, nullptr);
+        instance_ = VK_NULL_HANDLE;
     }
+}
+
+
+VulkanContext::~VulkanContext()
+{
+    cleanup();
 }

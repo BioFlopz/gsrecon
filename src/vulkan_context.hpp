@@ -48,6 +48,10 @@ private:
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_ = VK_NULL_HANDLE;
 
+    void cleanup();
+
+    VkDebugUtilsMessengerEXT debugMessenger_ = VK_NULL_HANDLE;
+
     std::array<uint8_t, VK_UUID_SIZE> deviceUUID_{};
 
 };
