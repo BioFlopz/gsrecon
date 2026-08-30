@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <vulkan/vulkan.h>
 #include "vulkan_context.hpp"
+#include "vulkan_swapchain.hpp"
 
 #include <vector>
 
@@ -67,7 +68,30 @@ int WINAPI wWinMain(
 	    return 0;
 	}
 
+	RECT clientRect{};
 
+	if (!GetClientRect(window, &clientRect))
+	{
+	    return -1;
+	}
+
+	const uint32_t width = static_cast<uint32_t>(clientRect.right - clientRect.left);
+
+	const uint32_t height = static_cast<uint32_t>(clientRect.bottom - clientRect.top);
+	
+	VulkanSwapchain swapchain;
+
+	if (!swapchain.init(
+	        vulkan.physicalDevice(),
+	        vulkan.device(),
+	        vulkan.surface(),
+	        vulkan.graphicsQueueFamily(),
+	        vulkan.presentQueueFamily(),
+	        width,
+	        height))
+	{
+	    return -1;
+	}
 
 
 

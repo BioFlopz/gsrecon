@@ -27,10 +27,27 @@ public:
         return physicalDevice_;
     }
 
+    VkDevice device() const
+    {
+        return device_;
+    }
+
+    uint32_t graphicsQueueFamily() const
+    {
+        return graphicsQueueFamily_;
+    }
+
+    uint32_t presentQueueFamily() const
+    {
+        return presentQueueFamily_;
+    }
+    
     const std::array<uint8_t, VK_UUID_SIZE>& deviceUUID() const
     {
         return deviceUUID_;
     }
+
+
 
 private:
     bool selectPhysicalDevice();

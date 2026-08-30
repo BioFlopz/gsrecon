@@ -3,8 +3,6 @@
 #include <cstring>
 
 
-
-
 namespace
 {
 
@@ -288,23 +286,17 @@ bool VulkanContext::init(HINSTANCE hInstance, HWND window)
 bool supportsRequiredFeatures(VkPhysicalDevice device)
 {
     VkPhysicalDeviceVulkan13Features features13{};
-    features13.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
 
     VkPhysicalDeviceVulkan12Features features12{};
-    features12.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     features12.pNext = &features13;
 
     VkPhysicalDeviceFeatures2 features{};
-    features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features.pNext = &features12;
 
-    vkGetPhysicalDeviceFeatures2(
-        device,
-        &features
-    );
+    vkGetPhysicalDeviceFeatures2(device, &features);
 
     return
         features12.timelineSemaphore == VK_TRUE &&
@@ -346,8 +338,7 @@ bool VulkanContext::selectPhysicalDevice()
             continue;
         }
 
-        QueueFamilyIndices queues =
-            findQueueFamilies(device, surface_);
+        QueueFamilyIndices queues = findQueueFamilies(device, surface_);
 
         if (!queues.complete())
         {
@@ -373,25 +364,18 @@ bool VulkanContext::selectPhysicalDevice()
 
         uint32_t presentModeCount = 0;
 
-        if (vkGetPhysicalDeviceSurfacePresentModesKHR(
-                device,
-                surface_,
-                &presentModeCount,
-                nullptr) != VK_SUCCESS ||
-            presentModeCount == 0)
+        if (vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface_, &presentModeCount, nullptr) != VK_SUCCESS || presentModeCount == 0)
         {
             continue;
         }
 
         int score = 0;
 
-        if (properties.deviceType ==
-            VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
         {
             score = 2;
         }
-        else if (properties.deviceType ==
-                 VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+        else if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
         {
             score = 1;
         }
