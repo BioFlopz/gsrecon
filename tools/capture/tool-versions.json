@@ -1,0 +1,15 @@
+{
+  "renderdoc": {
+    "version": "1.45",
+    "tag": "v1.45",
+    "commit": "2fc0bc0",
+    "architecture": "x64",
+
+    "buildsUrl": "https://renderdoc.org/builds",
+    "archiveName": "RenderDoc_1.45_64.zip",
+
+    "installDirectory": ".tools/renderdoc/1.45",
+
+    "sha256": "BD665C348A8245D10A1F513E35B83603EDC1A78006277583D09EC0769286EEA4"
+  }
+}
