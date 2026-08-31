@@ -23,6 +23,7 @@ void attachDebugConsole()
 #include "vulkan_context.hpp"
 #include "vulkan_swapchain.hpp"
 #include "vulkan_frame.hpp"
+#include "shader.hpp"
 
 #include <vector>
 
@@ -44,7 +45,7 @@ VkResult acquireSwapchainImage(
 
 
 
-bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex)
+bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkPipeline computePipeline)
 {
     if (imageIndex >= swapchain.images().size() ||
         imageIndex >= swapchain.imageViews().size())
@@ -65,6 +66,10 @@ bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain
     {
         return false;
     }
+
+	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+
+	vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
 
     VkImageMemoryBarrier2 toColor{};
     toColor.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -263,6 +268,60 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    return 0;
 	}
 
+	VkShaderModule computeShaderModule = VK_NULL_HANDLE;
+
+	if (!loadShaderModule(GSRECON_SHADER_DIR "/compute.spv", vulkan.device(), &computeShaderModule))
+	{
+#ifdef GSRECON_ENABLE_DEBUG_CONSOLE
+    std::fprintf(stderr, "Failed to create compute shader module.\n");
+#endif
+
+	    return -1;
+	}
+
+#ifdef GSRECON_ENABLE_DEBUG_CONSOLE
+	std::printf("Compute shader module: OK\n");
+#endif
+
+	VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
+
+	VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+
+	if (vkCreatePipelineLayout(vulkan.device(), &layoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS)
+	{
+	    vkDestroyShaderModule(vulkan.device(), computeShaderModule, nullptr);
+
+	    return -1;
+	}
+
+	VkPipelineShaderStageCreateInfo stageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+
+	stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	stageInfo.module = computeShaderModule;
+	stageInfo.pName = "main";
+
+	VkComputePipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+
+	pipelineInfo.stage = stageInfo;
+	pipelineInfo.layout = computePipelineLayout;
+
+	VkPipeline computePipeline = VK_NULL_HANDLE;
+
+	if (vkCreateComputePipelines(vulkan.device(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline) != VK_SUCCESS)
+	{
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    vkDestroyShaderModule(vulkan.device(), computeShaderModule, nullptr);
+
+	    return -1;
+	}
+
+#ifdef GSRECON_ENABLE_DEBUG_CONSOLE
+	std::printf("Compute pipeline: OK\n");
+#endif
+
+	vkDestroyShaderModule(vulkan.device(), computeShaderModule, nullptr);
+
 	RECT clientRect{};
 
 	if (!GetClientRect(window, &clientRect))
@@ -332,7 +391,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    break;
 	}
 
-	if (!recordClearFrame(vulkan.device(), frame, swapchain, imageIndex))
+	if (!recordClearFrame(vulkan.device(), frame, swapchain, imageIndex, computePipeline))
 	{
 	    exitCode = -1;
 	    running = false;
@@ -368,6 +427,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	{
 	    return -1;
 	}
+
+	vkDeviceWaitIdle(vulkan.device());
+
+	vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+
+	vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
 
 	return static_cast<int>(message.wParam);
 }
