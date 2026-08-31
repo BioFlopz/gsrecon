@@ -20,6 +20,10 @@ jobs:
       - name: Initialize submodules
         run: git submodule update --init --recursive
 
+      - name: Bootstrap Vulkan tools
+        shell: pwsh
+        run: .\tools\capture\bootstrap-vulkan-tools.ps1
+
       - name: Configure
         run: cmake --preset windows-msvc
 

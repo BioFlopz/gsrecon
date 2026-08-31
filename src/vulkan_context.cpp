@@ -161,29 +161,25 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surfa
 
     QueueFamilyIndices indices{};
 
+    constexpr VkQueueFlags requiredGraphicsFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
+
     for (uint32_t i = 0; i < count; ++i)
     {
         VkBool32 presentSupport = VK_FALSE;
 
-        vkGetPhysicalDeviceSurfaceSupportKHR(
-            device,
-            i,
-            surface,
-            &presentSupport
-        );
+        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
 
-        const bool graphicsSupport =
-            (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+        const bool graphicsComputeSupport = (families[i].queueFlags & requiredGraphicsFlags) == requiredGraphicsFlags;
 
-        // Prefer one family capable of both.
-        if (graphicsSupport && presentSupport == VK_TRUE)
+        // Prefer one family capable of graphics, compute, and present.
+        if (graphicsComputeSupport && presentSupport == VK_TRUE)
         {
             indices.graphics = i;
             indices.present = i;
             return indices;
         }
 
-        if (graphicsSupport && indices.graphics == UINT32_MAX)
+        if (graphicsComputeSupport && indices.graphics == UINT32_MAX)
         {
             indices.graphics = i;
         }
