@@ -1,5 +1,24 @@
 
+
 #include <Windows.h>
+#include <cstdio>
+
+
+#ifdef GSRECON_ENABLE_DEBUG_CONSOLE
+void attachDebugConsole()
+{
+    if (!AllocConsole())
+    {
+        return;
+    }
+
+    FILE* stream = nullptr;
+    freopen_s(&stream, "CONOUT$", "w", stdout);
+    freopen_s(&stream, "CONOUT$", "w", stderr);
+}
+#endif
+
+
 #include <vulkan/vulkan.h>
 #include "vulkan_context.hpp"
 #include "vulkan_swapchain.hpp"
@@ -203,6 +222,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
+#ifdef GSRECON_ENABLE_DEBUG_CONSOLE
+    attachDebugConsole();
+#endif
     const wchar_t CLASS_NAME[] = L"gsrecon window";
 
     WNDCLASS windowClass{};

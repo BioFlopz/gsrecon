@@ -27,6 +27,7 @@ target_compile_definitions(
     _UNICODE
     VK_USE_PLATFORM_WIN32_KHR
     $<$<CONFIG:Debug>:GSRECON_ENABLE_VALIDATION>
+    $<$<CONFIG:Debug>:GSRECON_ENABLE_DEBUG_CONSOLE>
 )
 
 target_link_libraries(
