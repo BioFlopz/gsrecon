@@ -67,3 +67,8 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+
+# Local capture tools and generated captures
+.tools/
+captures/
