@@ -1,0 +1,44 @@
+[gfxrecon] WARNING - Replay tool has detected that the capture layer is enabled
+================== Start timer (Frame: 1) ==================
+[gfxrecon] WARNING - Mismatch:
+[gfxrecon] WARNING - Captured application name: gsrecon.exe
+[gfxrecon] WARNING - Replayer process name: gfxrecon-replay.exe
+[gfxrecon] WARNING - This can lead to diverging driver behavior between the replayer and captured application
+[gfxrecon] WARNING - Recommendation: Rename gfxrecon-replay.exe to match the application's executable name
+[gfxrecon] INFO - Loading state for captured frame 16
+[gfxrecon] INFO - Enabling the VK_KHR_get_surface_capabilities2 extension
+[gfxrecon] INFO - Settings Loader: Found option "GFXRECON_CAPTURE_FILE" with value "c:\Users\User\OneDrive\BioFlopz\gsrecon\captures\gfxreconstruct\gsrecon.gfxr"
+[gfxrecon] INFO - Settings Loader: Found option "GFXRECON_CAPTURE_FRAMES" with value "16"
+[gfxrecon] INFO - Settings Loader: Found option "GFXRECON_CAPTURE_FILE" with value "c:\Users\User\OneDrive\BioFlopz\gsrecon\captures\gfxreconstruct\gsrecon.gfxr"
+[gfxrecon] INFO - Settings Loader: Found option "GFXRECON_CAPTURE_FRAMES" with value "16"
+[gfxrecon] INFO - Initializing GFXReconstruct capture layer
+[gfxrecon] INFO -   GFXReconstruct Version 1.0.5 (b23931d) RelWithDebInfo
+[gfxrecon] INFO -   Vulkan Header Version 1.4.357
+[gfxrecon] INFO - Finished loading state for captured frame 16
+================== Start timer (Frame: 2) ==================
+================== End timer (Frame: 2) ==================
+Load time:  0.742451 seconds (frame 16)
+Total time: 0.743948 seconds
+Measured FPS: 27027.027027 fps, 0.000037 seconds, 1 frame, 1 loop, framerange [1-2)
+[gfxrecon] WARNING - Replay tool has detected that the capture layer is enabled
+================== Start timer (Frame: 1) ==================
+[gfxrecon] WARNING - Mismatch:
+[gfxrecon] WARNING - Captured application name: gsrecon.exe
+[gfxrecon] WARNING - Replayer process name: gfxrecon-replay.exe
+[gfxrecon] WARNING - This can lead to diverging driver behavior between the replayer and captured application
+[gfxrecon] WARNING - Recommendation: Rename gfxrecon-replay.exe to match the application's executable name
+[gfxrecon] INFO - Loading state for captured frame 16
+[gfxrecon] INFO - Enabling the VK_KHR_get_surface_capabilities2 extension
+[gfxrecon] INFO - Settings Loader: Found option "GFXRECON_CAPTURE_FILE" with value "c:\Users\User\OneDrive\BioFlopz\gsrecon\captures\gfxreconstruct\gsrecon.gfxr"
+[gfxrecon] INFO - Settings Loader: Found option "GFXRECON_CAPTURE_FRAMES" with value "16"
+[gfxrecon] INFO - Settings Loader: Found option "GFXRECON_CAPTURE_FILE" with value "c:\Users\User\OneDrive\BioFlopz\gsrecon\captures\gfxreconstruct\gsrecon.gfxr"
+[gfxrecon] INFO - Settings Loader: Found option "GFXRECON_CAPTURE_FRAMES" with value "16"
+[gfxrecon] INFO - Initializing GFXReconstruct capture layer
+[gfxrecon] INFO -   GFXReconstruct Version 1.0.5 (b23931d) RelWithDebInfo
+[gfxrecon] INFO -   Vulkan Header Version 1.4.357
+[gfxrecon] INFO - Finished loading state for captured frame 16
+================== Start timer (Frame: 2) ==================
+================== End timer (Frame: 2) ==================
+Load time:  0.530431 seconds (frame 16)
+Total time: 0.531435 seconds
+Measured FPS: 32258.064516 fps, 0.000031 seconds, 1 frame, 1 loop, framerange [1-2)

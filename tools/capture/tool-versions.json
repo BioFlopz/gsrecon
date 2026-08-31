@@ -1,15 +1,21 @@
 {
-  "renderdoc": {
-    "version": "1.45",
-    "tag": "v1.45",
-    "commit": "2fc0bc0",
-    "architecture": "x64",
-
-    "buildsUrl": "https://renderdoc.org/builds",
-    "archiveName": "RenderDoc_1.45_64.zip",
-
-    "installDirectory": ".tools/renderdoc/1.45",
-
-    "sha256": "BD665C348A8245D10A1F513E35B83603EDC1A78006277583D09EC0769286EEA4"
-  }
+    "renderdoc": {
+        "version": "1.45",
+        "tag": "v1.45",
+        "commit": "2fc0bc0",
+        "architecture": "x64",
+        "buildsUrl": "https://renderdoc.org/builds",
+        "archiveName": "RenderDoc_1.45_64.zip",
+        "installDirectory": ".tools/renderdoc/1.45",
+        "sha256": "BD665C348A8245D10A1F513E35B83603EDC1A78006277583D09EC0769286EEA4"
+    },
+    "vulkanSdkTools": {
+        "version": "1.4.357.0",
+        "tag": "vulkan-sdk-1.4.357.0",
+        "architecture": "x64",
+        "downloadUrl": "https://sdk.lunarg.com/sdk/download/1.4.357.0/windows/vulkansdk-windows-X64-1.4.357.0.exe",
+        "installerName": "vulkansdk-windows-X64-1.4.357.0.exe",
+        "installDirectory": ".tools/vulkan-sdk/1.4.357.0",
+        "sha256": "81F474711E9042F4CD22B31B2F7A8870DB2E428B21586FB43DD80150BE97310D"
+    }
 }
