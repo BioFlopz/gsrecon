@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <cstdio>
+#include <iostream>
 
 
 #ifdef GSRECON_ENABLE_DEBUG_CONSOLE
@@ -45,7 +46,7 @@ VkResult acquireSwapchainImage(
 
 
 
-bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkPipeline computePipeline)
+bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkPipeline computePipeline, VkPipelineLayout computePipelineLayout, VkDescriptorSet computeDescriptorSet)
 {
     if (imageIndex >= swapchain.images().size() ||
         imageIndex >= swapchain.imageViews().size())
@@ -69,7 +70,23 @@ bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain
 
 	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
 
+	vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &computeDescriptorSet, 0, nullptr);
+
 	vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
+
+	VkMemoryBarrier2 storageReadbackBarrier{};
+	storageReadbackBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+	storageReadbackBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+	storageReadbackBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+	storageReadbackBarrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+	storageReadbackBarrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+
+	VkDependencyInfo storageReadbackDependency{};
+	storageReadbackDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+	storageReadbackDependency.memoryBarrierCount = 1;
+	storageReadbackDependency.pMemoryBarriers = &storageReadbackBarrier;
+
+	vkCmdPipelineBarrier2(frame.commandBuffer, &storageReadbackDependency);
 
     VkImageMemoryBarrier2 toColor{};
     toColor.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -283,9 +300,30 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	std::printf("Compute shader module: OK\n");
 #endif
 
+	VkDescriptorSetLayout computeDescriptorSetLayout = VK_NULL_HANDLE;
+
+	VkDescriptorSetLayoutBinding storageBinding{};
+	storageBinding.binding = 0;
+	storageBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	storageBinding.descriptorCount = 1;
+	storageBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo{};
+	descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	descriptorLayoutInfo.bindingCount = 1;
+	descriptorLayoutInfo.pBindings = &storageBinding;
+
+	if (vkCreateDescriptorSetLayout(vulkan.device(), &descriptorLayoutInfo, nullptr, &computeDescriptorSetLayout) != VK_SUCCESS)
+	{
+	    return EXIT_FAILURE;
+	}
+
 	VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
 
-	VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+	VkPipelineLayoutCreateInfo layoutInfo{};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	layoutInfo.setLayoutCount = 1;
+	layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
 
 	if (vkCreatePipelineLayout(vulkan.device(), &layoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS)
 	{
@@ -314,6 +352,182 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    vkDestroyShaderModule(vulkan.device(), computeShaderModule, nullptr);
 
 	    return -1;
+	}
+
+	VkBuffer storageBuffer = VK_NULL_HANDLE;
+
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = sizeof(uint32_t) * 4;
+	bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	if (vkCreateBuffer(vulkan.device(), &bufferInfo, nullptr, &storageBuffer) != VK_SUCCESS)
+	{
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	VkMemoryRequirements storageMemoryRequirements{};
+
+	vkGetBufferMemoryRequirements(vulkan.device(), storageBuffer, &storageMemoryRequirements);
+
+	VkPhysicalDeviceMemoryProperties memoryProperties{};
+
+	vkGetPhysicalDeviceMemoryProperties(vulkan.physicalDevice(), &memoryProperties);
+
+	constexpr VkMemoryPropertyFlags requiredMemoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+	uint32_t storageMemoryType = UINT32_MAX;
+
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
+	{
+	    const bool supportedByBuffer = (storageMemoryRequirements.memoryTypeBits & (1u << i)) != 0;
+
+	    const bool hasRequiredProperties = (memoryProperties.memoryTypes[i].propertyFlags & requiredMemoryProperties) == requiredMemoryProperties;
+
+	    if (supportedByBuffer && hasRequiredProperties)
+	    {
+	        storageMemoryType = i;
+	        break;
+	    }
+	}
+
+	VkDeviceMemory storageMemory = VK_NULL_HANDLE;
+
+	VkMemoryAllocateInfo allocationInfo{};
+	allocationInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocationInfo.allocationSize = storageMemoryRequirements.size;
+	allocationInfo.memoryTypeIndex = storageMemoryType;
+
+	if (vkAllocateMemory(vulkan.device(), &allocationInfo, nullptr, &storageMemory) != VK_SUCCESS)
+	{
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	if (vkBindBufferMemory(vulkan.device(), storageBuffer, storageMemory, 0) != VK_SUCCESS)
+	{
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	void* mappedStorageData = nullptr;
+
+	if (vkMapMemory(vulkan.device(), storageMemory, 0, sizeof(uint32_t) * 4, 0, &mappedStorageData) != VK_SUCCESS)
+	{
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	auto* storageValues = static_cast<uint32_t*>(mappedStorageData);
+
+	storageValues[0] = 0;
+	storageValues[1] = 0;
+	storageValues[2] = 0;
+	storageValues[3] = 0;
+
+	vkUnmapMemory(vulkan.device(), storageMemory);
+
+	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+
+	VkDescriptorPoolSize poolSize{};
+	poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	poolSize.descriptorCount = 1;
+
+	VkDescriptorPoolCreateInfo poolInfo{};
+	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	poolInfo.maxSets = 1;
+	poolInfo.poolSizeCount = 1;
+	poolInfo.pPoolSizes = &poolSize;
+
+	if (vkCreateDescriptorPool(vulkan.device(), &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
+	{
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    vkDestroyDescriptorSetLayout(vulkan.device(), computeDescriptorSetLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	VkDescriptorSet computeDescriptorSet = VK_NULL_HANDLE;
+
+	VkDescriptorSetAllocateInfo descriptorSetInfo{};
+	descriptorSetInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	descriptorSetInfo.descriptorPool = descriptorPool;
+	descriptorSetInfo.descriptorSetCount = 1;
+	descriptorSetInfo.pSetLayouts = &computeDescriptorSetLayout;
+
+	if (vkAllocateDescriptorSets(vulkan.device(), &descriptorSetInfo, &computeDescriptorSet) != VK_SUCCESS)
+	{
+	    vkDestroyDescriptorPool(vulkan.device(), descriptorPool, nullptr);
+
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    vkDestroyDescriptorSetLayout(vulkan.device(), computeDescriptorSetLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	VkDescriptorBufferInfo storageBufferInfo{};
+	storageBufferInfo.buffer = storageBuffer;
+	storageBufferInfo.offset = 0;
+	storageBufferInfo.range = sizeof(uint32_t) * 4;
+
+	VkWriteDescriptorSet storageWrite{};
+	storageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	storageWrite.dstSet = computeDescriptorSet;
+	storageWrite.dstBinding = 0;
+	storageWrite.dstArrayElement = 0;
+	storageWrite.descriptorCount = 1;
+	storageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	storageWrite.pBufferInfo = &storageBufferInfo;
+
+	vkUpdateDescriptorSets(vulkan.device(), 1, &storageWrite, 0, nullptr);
+
+	if (storageMemoryType == UINT32_MAX)
+	{
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
 	}
 
 #ifdef GSRECON_ENABLE_DEBUG_CONSOLE
@@ -391,7 +605,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    break;
 	}
 
-	if (!recordClearFrame(vulkan.device(), frame, swapchain, imageIndex, computePipeline))
+	if (!recordClearFrame(vulkan.device(), frame, swapchain, imageIndex, computePipeline, computePipelineLayout, computeDescriptorSet))
 	{
 	    exitCode = -1;
 	    running = false;
@@ -430,9 +644,40 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	vkDeviceWaitIdle(vulkan.device());
 
+	bool storageReadbackOk = false;
+
+	void* mappedReadback = nullptr;
+
+	if (vkMapMemory(vulkan.device(), storageMemory, 0, sizeof(uint32_t) * 4, 0, &mappedReadback) == VK_SUCCESS)
+	{
+	    const auto* values = static_cast<const uint32_t*>(mappedReadback);
+
+	    storageReadbackOk =
+	        values[0] == 1 &&
+	        values[1] == 2 &&
+	        values[2] == 3 &&
+	        values[3] == 4;
+
+	    std::cout
+	        << "Storage buffer: "
+	        << values[0] << ' '
+	        << values[1] << ' '
+	        << values[2] << ' '
+	        << values[3] << '\n';
+
+	    vkUnmapMemory(vulkan.device(), storageMemory);
+	}
+
+	vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+
 	vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
 
 	vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
 
-	return static_cast<int>(message.wParam);
+	vkDestroyDescriptorPool(vulkan.device(), descriptorPool, nullptr);
+	vkDestroyDescriptorSetLayout(vulkan.device(), computeDescriptorSetLayout, nullptr);
+
+	return storageReadbackOk ? EXIT_SUCCESS : EXIT_FAILURE;
 }
