@@ -1,4 +1,6 @@
 
+extern "C" bool runCudaKernelSmoke();
+
 #include <Windows.h>
 #include <cuda_runtime_api.h>
 #include <cstdio>
@@ -279,6 +281,14 @@ bool selectCudaDeviceForVulkan(VkPhysicalDevice physicalDevice)
         {
             return false;
         }
+
+		if (!runCudaKernelSmoke())
+		{
+		    std::cerr << "CUDA kernel: FAILED\n";
+		    return 1;
+		}
+
+		std::cout << "CUDA kernel: OK\n";
 
 #ifdef GSRECON_ENABLE_DEBUG_CONSOLE
         std::printf("CUDA device matched Vulkan: %s\n", cudaProperties.name);

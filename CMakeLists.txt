@@ -140,11 +140,90 @@ endif()
 
 
 #
+# Project-local CUDA NVCC
+#
+
+string(
+    JSON
+    GSRECON_CUDA_NVCC_DIRECTORY
+    GET
+    "${GSRECON_TOOL_VERSIONS_JSON}"
+    cudaNvcc
+    installDirectory
+)
+
+set(
+    GSRECON_NVCC
+    "${CMAKE_SOURCE_DIR}/${GSRECON_CUDA_NVCC_DIRECTORY}/bin/nvcc.exe"
+)
+
+if(NOT EXISTS "${GSRECON_NVCC}")
+    message(
+        FATAL_ERROR
+        "CUDA NVCC not found. "
+        "Run tools/bootstrap-cuda.ps1 first."
+    )
+endif()
+
+
+
+#
 # Vulkan source dependencies
 #
 
 add_subdirectory(3rdparty/Vulkan-Headers)
 add_subdirectory(3rdparty/Vulkan-Loader)
+
+
+#
+# CUDA kernel
+#
+
+set(
+    GSRECON_CUDA_KERNEL
+    "${CMAKE_SOURCE_DIR}/src/cuda_kernel.cu"
+)
+
+set(
+    GSRECON_CUDA_KERNEL_OBJECT
+    "${CMAKE_BINARY_DIR}/cuda/cuda_kernel.obj"
+)
+
+add_custom_command(
+    OUTPUT
+        "${GSRECON_CUDA_KERNEL_OBJECT}"
+
+    COMMAND
+        "${CMAKE_COMMAND}"
+        -E
+        make_directory
+        "${CMAKE_BINARY_DIR}/cuda"
+
+    COMMAND
+        "${GSRECON_NVCC}"
+        --std=c++20
+        --gpu-architecture=sm_75
+        --compiler-options=/MD
+        --compile
+        --include-path "${GSRECON_CUDA_INCLUDE_DIR}"
+        --include-path "${GSRECON_CUDA_CRT_INCLUDE_DIR}"
+        "${GSRECON_CUDA_KERNEL}"
+        -o "${GSRECON_CUDA_KERNEL_OBJECT}"
+
+    DEPENDS
+        "${GSRECON_CUDA_KERNEL}"
+
+    COMMENT
+        "Compiling cuda_kernel.cu"
+
+    VERBATIM
+)
+
+set_source_files_properties(
+    "${GSRECON_CUDA_KERNEL_OBJECT}"
+    PROPERTIES
+        EXTERNAL_OBJECT TRUE
+)
 
 
 #
@@ -168,6 +247,8 @@ add_executable(
 
     src/shader.cpp
     src/shader.hpp
+
+    "${GSRECON_CUDA_KERNEL_OBJECT}"
 )
 
 

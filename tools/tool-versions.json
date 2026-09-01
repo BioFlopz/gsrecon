@@ -32,5 +32,19 @@
         "downloadUrl": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_crt/windows-x86_64/cuda_crt-windows-x86_64-13.3.73-archive.zip",
         "sha256": "9227ec7c80db10b7cb0d4ee71ed62ec7ae36e67890216413ab6f9afa35d577f0",
         "installDirectory": ".tools/cuda/13.3.1/crt"
+    },
+    "cudaNvcc": {
+        "version": "13.3.73",
+        "archiveName": "cuda_nvcc-windows-x86_64-13.3.73-archive.zip",
+        "downloadUrl": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvcc/windows-x86_64/cuda_nvcc-windows-x86_64-13.3.73-archive.zip",
+        "sha256": "270214eaee58e49f8fca52a910a46afbfab227858e70897cba8afae10826280b",
+        "installDirectory": ".tools/cuda/13.3.1/nvcc"
+    },
+    "libNvvm": {
+        "version": "13.3.73",
+        "archiveName": "libnvvm-windows-x86_64-13.3.73-archive.zip",
+        "downloadUrl": "https://developer.download.nvidia.com/compute/cuda/redist/libnvvm/windows-x86_64/libnvvm-windows-x86_64-13.3.73-archive.zip",
+        "sha256": "ca8f11d5173ac16a166be8fafefbf9676542a097de1fce61b3f17696dffc1f27",
+        "installDirectory": ".tools/cuda/13.3.1/nvcc/nvvm"
     }
 }

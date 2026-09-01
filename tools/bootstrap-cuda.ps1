@@ -20,7 +20,7 @@ $crt = $tools.cudaCrt
 
 $cacheDirectory = Join-Path `
     -Path $repoRoot `
-    -ChildPath ".tools\cache"
+    -ChildPath ".tools\_cache"
 
 New-Item `
     -ItemType Directory `
@@ -384,6 +384,308 @@ else
 
 
 #
+# CUDA NVCC
+#
+
+$nvcc = $tools.cudaNvcc
+
+$nvccInstallDirectory = Join-Path `
+    -Path $repoRoot `
+    -ChildPath $nvcc.installDirectory
+
+$nvccExecutable = Join-Path `
+    -Path $nvccInstallDirectory `
+    -ChildPath "bin\nvcc.exe"
+
+if (Test-Path -Path $nvccExecutable -PathType Leaf)
+{
+    Write-Host "CUDA NVCC $($nvcc.version) already installed."
+}
+else
+{
+    if (Test-Path -Path $nvccInstallDirectory)
+    {
+        Write-Host "Removing incomplete CUDA NVCC installation..."
+
+        Remove-Item `
+            -Path $nvccInstallDirectory `
+            -Recurse `
+            -Force
+    }
+
+    $nvccArchive = Join-Path `
+        -Path $cacheDirectory `
+        -ChildPath $nvcc.archiveName
+
+    if (-not (Test-Path -Path $nvccArchive -PathType Leaf))
+    {
+        Write-Host "Downloading CUDA NVCC $($nvcc.version)..."
+
+        Invoke-WebRequest `
+            -Uri $nvcc.downloadUrl `
+            -OutFile $nvccArchive `
+            -UseBasicParsing
+    }
+
+    $expectedHash =
+        $nvcc.sha256.ToUpperInvariant()
+
+    $actualHash = (
+        Get-FileHash `
+            -Path $nvccArchive `
+            -Algorithm SHA256
+    ).Hash.ToUpperInvariant()
+
+    if ($actualHash -ne $expectedHash)
+    {
+        Remove-Item `
+            -Path $nvccArchive `
+            -Force
+
+        throw "CUDA NVCC archive SHA-256 mismatch."
+    }
+
+    Write-Host "CUDA NVCC archive SHA-256 OK"
+
+    $nvccTempDirectory = Join-Path `
+        -Path $cacheDirectory `
+        -ChildPath "cuda-nvcc-$($nvcc.version)-extract"
+
+    if (Test-Path -Path $nvccTempDirectory)
+    {
+        Remove-Item `
+            -Path $nvccTempDirectory `
+            -Recurse `
+            -Force
+    }
+
+    New-Item `
+        -ItemType Directory `
+        -Path $nvccTempDirectory `
+        -Force |
+        Out-Null
+
+    Expand-Archive `
+        -Path $nvccArchive `
+        -DestinationPath $nvccTempDirectory
+
+    $nvccInArchive = Get-ChildItem `
+        -Path $nvccTempDirectory `
+        -Filter "nvcc.exe" `
+        -Recurse `
+        -File |
+        Select-Object -First 1
+
+    if ($null -eq $nvccInArchive)
+    {
+        throw "nvcc.exe was not found in the CUDA NVCC archive."
+    }
+
+    $nvccBinDirectory = Split-Path `
+        -Path $nvccInArchive.FullName `
+        -Parent
+
+    $nvccPackageRoot = Split-Path `
+        -Path $nvccBinDirectory `
+        -Parent
+
+    New-Item `
+        -ItemType Directory `
+        -Path $nvccInstallDirectory `
+        -Force |
+        Out-Null
+
+    Copy-Item `
+        -Path (
+            Join-Path `
+                -Path $nvccPackageRoot `
+                -ChildPath "*"
+        ) `
+        -Destination $nvccInstallDirectory `
+        -Recurse `
+        -Force
+
+    Remove-Item `
+        -Path $nvccTempDirectory `
+        -Recurse `
+        -Force
+
+    if (-not (
+        Test-Path `
+            -Path $nvccExecutable `
+            -PathType Leaf
+    ))
+    {
+        throw "nvcc.exe missing after installation."
+    }
+
+    Write-Host "CUDA NVCC $($nvcc.version) ready."
+}
+
+
+$libNvvm = $tools.libNvvm
+
+#
+# libNVVM
+#
+
+$libNvvmInstallDirectory = Join-Path `
+    -Path $repoRoot `
+    -ChildPath $libNvvm.installDirectory
+
+$cicc = Join-Path `
+    -Path $libNvvmInstallDirectory `
+    -ChildPath "bin\cicc.exe"
+
+$libdeviceDirectory = Join-Path `
+    -Path $libNvvmInstallDirectory `
+    -ChildPath "libdevice"
+
+$libdevice = Get-ChildItem `
+    -Path $libdeviceDirectory `
+    -Filter "libdevice*.bc" `
+    -File `
+    -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+
+$libNvvmReady =
+    (Test-Path -Path $cicc -PathType Leaf) -and
+    ($null -ne $libdevice)
+
+if ($libNvvmReady)
+{
+    Write-Host "CUDA libNVVM $($libNvvm.version) already installed."
+}
+else
+{
+    if (Test-Path -Path $libNvvmInstallDirectory)
+    {
+        Write-Host "Removing incomplete CUDA libNVVM installation..."
+
+        Remove-Item `
+            -Path $libNvvmInstallDirectory `
+            -Recurse `
+            -Force
+    }
+
+    $libNvvmArchive = Join-Path `
+        -Path $cacheDirectory `
+        -ChildPath $libNvvm.archiveName
+
+    if (-not (Test-Path -Path $libNvvmArchive -PathType Leaf))
+    {
+        Write-Host "Downloading CUDA libNVVM $($libNvvm.version)..."
+
+        Invoke-WebRequest `
+            -Uri $libNvvm.downloadUrl `
+            -OutFile $libNvvmArchive `
+            -UseBasicParsing
+    }
+
+    $expectedHash =
+        $libNvvm.sha256.ToUpperInvariant()
+
+    $actualHash = (
+        Get-FileHash `
+            -Path $libNvvmArchive `
+            -Algorithm SHA256
+    ).Hash.ToUpperInvariant()
+
+    if ($actualHash -ne $expectedHash)
+    {
+        Remove-Item `
+            -Path $libNvvmArchive `
+            -Force
+
+        throw "CUDA libNVVM archive SHA-256 mismatch."
+    }
+
+    Write-Host "CUDA libNVVM archive SHA-256 OK"
+
+    $libNvvmTempDirectory = Join-Path `
+        -Path $cacheDirectory `
+        -ChildPath "cuda-libnvvm-$($libNvvm.version)-extract"
+
+    if (Test-Path -Path $libNvvmTempDirectory)
+    {
+        Remove-Item `
+            -Path $libNvvmTempDirectory `
+            -Recurse `
+            -Force
+    }
+
+    New-Item `
+        -ItemType Directory `
+        -Path $libNvvmTempDirectory `
+        -Force |
+        Out-Null
+
+    Expand-Archive `
+        -Path $libNvvmArchive `
+        -DestinationPath $libNvvmTempDirectory
+
+    $ciccInArchive = Get-ChildItem `
+        -Path $libNvvmTempDirectory `
+        -Filter "cicc.exe" `
+        -Recurse `
+        -File |
+        Select-Object -First 1
+
+    if ($null -eq $ciccInArchive)
+    {
+        throw "cicc.exe was not found in the CUDA libNVVM archive."
+    }
+
+    $binDirectory = Split-Path `
+        -Path $ciccInArchive.FullName `
+        -Parent
+
+    $libNvvmPackageRoot = Split-Path `
+        -Path $binDirectory `
+        -Parent
+
+    New-Item `
+        -ItemType Directory `
+        -Path $libNvvmInstallDirectory `
+        -Force |
+        Out-Null
+
+    Copy-Item `
+        -Path (
+            Join-Path `
+                -Path $libNvvmPackageRoot `
+                -ChildPath "*"
+        ) `
+        -Destination $libNvvmInstallDirectory `
+        -Recurse `
+        -Force
+
+    Remove-Item `
+        -Path $libNvvmTempDirectory `
+        -Recurse `
+        -Force
+
+    $libdevice = Get-ChildItem `
+        -Path $libdeviceDirectory `
+        -Filter "libdevice*.bc" `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    if (-not (Test-Path -Path $cicc -PathType Leaf))
+    {
+        throw "CUDA libNVVM cicc.exe missing after installation."
+    }
+
+    if ($null -eq $libdevice)
+    {
+        throw "CUDA libdevice bitcode missing after installation."
+    }
+
+    Write-Host "CUDA libNVVM $($libNvvm.version) ready."
+}
+
+#
 # Success
 #
 
@@ -391,3 +693,4 @@ Write-Host ""
 Write-Host "CUDA project-local foundation ready."
 Write-Host "Runtime: $runtimeInstallDirectory"
 Write-Host "CRT:     $crtInstallDirectory"
+Write-Host "NVCC:    $nvccInstallDirectory"
