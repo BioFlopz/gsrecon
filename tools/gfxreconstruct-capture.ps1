@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (Resolve-Path "$PSScriptRoot\..\..").Path
+$repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 $manifestPath = Join-Path $PSScriptRoot "tool-versions.json"
 
 $tools = Get-Content $manifestPath -Raw | ConvertFrom-Json
