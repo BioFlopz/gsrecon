@@ -22,7 +22,11 @@ jobs:
 
       - name: Bootstrap Vulkan tools
         shell: pwsh
-        run: .\tools\capture\bootstrap-vulkan-tools.ps1
+        run: .\tools\bootstrap-vulkan-tools.ps1
+
+      - name: Bootstrap CUDA Runtime
+        shell: pwsh
+        run: .\tools\bootstrap-cuda.ps1
 
       - name: Configure
         run: cmake --preset windows-msvc

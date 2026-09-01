@@ -5,26 +5,14 @@ project(gsrecon LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_subdirectory(3rdparty/Vulkan-Headers)
-add_subdirectory(3rdparty/Vulkan-Loader)
 
-add_executable(
-    gsrecon
-    WIN32
-    src/main.cpp
-    src/vulkan_context.cpp
-    src/vulkan_context.hpp
-    src/vulkan_swapchain.cpp
-    src/vulkan_swapchain.hpp
-    src/vulkan_frame.cpp
-    src/vulkan_frame.hpp
-    src/shader.cpp
-    src/shader.hpp
-)
+#
+# Project-local tool manifest
+#
 
 set(
     GSRECON_TOOL_VERSIONS
-    "${CMAKE_SOURCE_DIR}/tools/capture/tool-versions.json"
+    "${CMAKE_SOURCE_DIR}/tools/tool-versions.json"
 )
 
 file(
@@ -32,6 +20,11 @@ file(
     "${GSRECON_TOOL_VERSIONS}"
     GSRECON_TOOL_VERSIONS_JSON
 )
+
+
+#
+# Project-local Vulkan SDK tools
+#
 
 string(
     JSON
@@ -51,9 +44,115 @@ if(NOT EXISTS "${GSRECON_DXC}")
     message(
         FATAL_ERROR
         "DXC not found: ${GSRECON_DXC}\n"
-        "Run tools/capture/bootstrap-vulkan-tools.ps1 first."
+        "Run tools/bootstrap-vulkan-tools.ps1 first."
     )
 endif()
+
+
+#
+# Project-local CUDA Runtime
+#
+
+string(
+    JSON
+    GSRECON_CUDA_RUNTIME_DIRECTORY
+    GET
+    "${GSRECON_TOOL_VERSIONS_JSON}"
+    cudaRuntime
+    installDirectory
+)
+
+set(
+    GSRECON_CUDA_RUNTIME_ROOT
+    "${CMAKE_SOURCE_DIR}/${GSRECON_CUDA_RUNTIME_DIRECTORY}"
+)
+
+set(
+    GSRECON_CUDA_INCLUDE_DIR
+    "${GSRECON_CUDA_RUNTIME_ROOT}/include"
+)
+
+set(
+    GSRECON_CUDART_LIBRARY
+    "${GSRECON_CUDA_RUNTIME_ROOT}/lib/x64/cudart.lib"
+)
+
+set(
+    GSRECON_CUDART_DLL
+    "${GSRECON_CUDA_RUNTIME_ROOT}/bin/x64/cudart64_13.dll"
+)
+
+if(NOT EXISTS "${GSRECON_CUDA_INCLUDE_DIR}/cuda_runtime_api.h")
+    message(
+        FATAL_ERROR
+        "CUDA Runtime headers not found. "
+        "Run tools/bootstrap-cuda.ps1 first."
+    )
+endif()
+
+if(NOT EXISTS "${GSRECON_CUDART_LIBRARY}")
+    message(
+        FATAL_ERROR
+        "CUDA Runtime library not found. "
+        "Run tools/bootstrap-cuda.ps1 first."
+    )
+endif()
+
+if(NOT EXISTS "${GSRECON_CUDART_DLL}")
+    message(
+        FATAL_ERROR
+        "CUDA Runtime DLL not found. "
+        "Run tools/bootstrap-cuda.ps1 first."
+    )
+endif()
+
+
+#
+# Vulkan source dependencies
+#
+
+add_subdirectory(3rdparty/Vulkan-Headers)
+add_subdirectory(3rdparty/Vulkan-Loader)
+
+
+#
+# Application
+#
+
+add_executable(
+    gsrecon
+    WIN32
+
+    src/main.cpp
+
+    src/vulkan_context.cpp
+    src/vulkan_context.hpp
+
+    src/vulkan_swapchain.cpp
+    src/vulkan_swapchain.hpp
+
+    src/vulkan_frame.cpp
+    src/vulkan_frame.hpp
+
+    src/shader.cpp
+    src/shader.hpp
+)
+
+
+#
+# CUDA Runtime headers
+#
+
+target_include_directories(
+    gsrecon
+    PRIVATE
+        "${GSRECON_CUDA_INCLUDE_DIR}"
+)
+
+
+#
+# Compute shader
+#
 
 set(
     GSRECON_COMPUTE_SHADER
@@ -66,10 +165,13 @@ set(
 )
 
 add_custom_command(
-    OUTPUT "${GSRECON_COMPUTE_SPV}"
+    OUTPUT
+        "${GSRECON_COMPUTE_SPV}"
 
     COMMAND
-        ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_COMMAND}"
+        -E
+        make_directory
         "${CMAKE_BINARY_DIR}/shaders"
 
     COMMAND
@@ -83,13 +185,16 @@ add_custom_command(
     DEPENDS
         "${GSRECON_COMPUTE_SHADER}"
 
-    COMMENT "Compiling compute.hlsl"
+    COMMENT
+        "Compiling compute.hlsl"
+
     VERBATIM
 )
 
 add_custom_target(
     gsrecon_shaders
-    DEPENDS "${GSRECON_COMPUTE_SPV}"
+    DEPENDS
+        "${GSRECON_COMPUTE_SPV}"
 )
 
 add_dependencies(
@@ -97,20 +202,53 @@ add_dependencies(
     gsrecon_shaders
 )
 
+
+#
+# Compile definitions
+#
+
 target_compile_definitions(
     gsrecon
     PRIVATE
-    UNICODE
-    _UNICODE
-    VK_USE_PLATFORM_WIN32_KHR
-    GSRECON_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders"
-    $<$<CONFIG:Debug>:GSRECON_ENABLE_VALIDATION>
-    $<$<CONFIG:Debug>:GSRECON_ENABLE_DEBUG_CONSOLE>
+        UNICODE
+        _UNICODE
+        VK_USE_PLATFORM_WIN32_KHR
+        GSRECON_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders"
+
+        $<$<CONFIG:Debug>:GSRECON_ENABLE_VALIDATION>
+        $<$<CONFIG:Debug>:GSRECON_ENABLE_DEBUG_CONSOLE>
 )
+
+
+#
+# Libraries
+#
 
 target_link_libraries(
     gsrecon
     PRIVATE
-    Vulkan::Headers
-    Vulkan::Loader
+        Vulkan::Headers
+        Vulkan::Loader
+        "${GSRECON_CUDART_LIBRARY}"
+)
+
+
+#
+# Copy project-local CUDA Runtime beside gsrecon.exe
+#
+
+add_custom_command(
+    TARGET
+        gsrecon
+
+    POST_BUILD
+
+    COMMAND
+        "${CMAKE_COMMAND}"
+        -E
+        copy_if_different
+        "${GSRECON_CUDART_DLL}"
+        "$<TARGET_FILE_DIR:gsrecon>"
+
+    VERBATIM
 )

@@ -17,5 +17,13 @@
         "installerName": "vulkansdk-windows-X64-1.4.357.0.exe",
         "installDirectory": ".tools/vulkan-sdk/1.4.357.0",
         "sha256": "81F474711E9042F4CD22B31B2F7A8870DB2E428B21586FB43DD80150BE97310D"
+    },
+    "cudaRuntime": {
+        "toolkitVersion": "13.3.1",
+        "version": "13.3.29",
+        "archiveName": "cuda_cudart-windows-x86_64-13.3.29-archive.zip",
+        "downloadUrl": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-13.3.29-archive.zip",
+        "sha256": "1feb7dd266813ffe8dbc24e115183a5ac35a4795c8d34aca0df85ab616b64d9c",
+        "installDirectory": ".tools/cuda/13.3.1/cudart"
     }
 }
