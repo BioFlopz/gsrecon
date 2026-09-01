@@ -15,9 +15,20 @@ def find_repo_root():
     current = os.path.abspath(os.getcwd())
 
     while True:
+        cmake_file = os.path.join(
+            current,
+            "CMakeLists.txt"
+        )
+
+        tool_manifest = os.path.join(
+            current,
+            "tools",
+            "tool-versions.json"
+        )
+
         if (
-            os.path.isfile(os.path.join(current, "CMakeLists.txt"))
-            and os.path.isdir(os.path.join(current, "tools", "capture"))
+            os.path.isfile(cmake_file)
+            and os.path.isfile(tool_manifest)
         ):
             return current
 
@@ -28,7 +39,10 @@ def find_repo_root():
 
         current = parent
 
-    raise RuntimeError("Could not find the gsrecon repository root.")
+    raise RuntimeError(
+        "Could not find the gsrecon repository root. "
+        "Run qrenderdoc from inside the gsrecon repository."
+    )
 
 
 def log(path, message):

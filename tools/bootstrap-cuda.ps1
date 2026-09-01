@@ -15,289 +15,379 @@ $tools = Get-Content `
     -Raw |
     ConvertFrom-Json
 
-$config = $tools.cudaRuntime
-
-$installDirectory = Join-Path `
-    -Path $repoRoot `
-    -ChildPath $config.installDirectory
+$runtime = $tools.cudaRuntime
+$crt = $tools.cudaCrt
 
 $cacheDirectory = Join-Path `
     -Path $repoRoot `
-    -ChildPath ".tools\_cache"
+    -ChildPath ".tools\cache"
 
-$archivePath = Join-Path `
+New-Item `
+    -ItemType Directory `
     -Path $cacheDirectory `
-    -ChildPath $config.archiveName
+    -Force |
+    Out-Null
 
-$headerPath = Join-Path `
-    -Path $installDirectory `
+
+#
+# CUDA Runtime
+#
+
+$runtimeInstallDirectory = Join-Path `
+    -Path $repoRoot `
+    -ChildPath $runtime.installDirectory
+
+$runtimeHeader = Join-Path `
+    -Path $runtimeInstallDirectory `
     -ChildPath "include\cuda_runtime_api.h"
 
-$libraryPath = Join-Path `
-    -Path $installDirectory `
+$runtimeLibrary = Join-Path `
+    -Path $runtimeInstallDirectory `
     -ChildPath "lib\x64\cudart.lib"
 
-$dllDirectory = Join-Path `
-    -Path $installDirectory `
+$runtimeDllDirectory = Join-Path `
+    -Path $runtimeInstallDirectory `
     -ChildPath "bin\x64"
 
-
-#
-# Check an existing project-local installation.
-#
-
-$dll = Get-ChildItem `
-    -Path $dllDirectory `
+$runtimeDll = Get-ChildItem `
+    -Path $runtimeDllDirectory `
     -Filter "cudart64_*.dll" `
     -File `
     -ErrorAction SilentlyContinue |
     Select-Object -First 1
 
-if (
-    (Test-Path -Path $headerPath -PathType Leaf) -and
-    (Test-Path -Path $libraryPath -PathType Leaf) -and
-    ($null -ne $dll)
-)
+$runtimeReady =
+    (Test-Path -Path $runtimeHeader -PathType Leaf) -and
+    (Test-Path -Path $runtimeLibrary -PathType Leaf) -and
+    ($null -ne $runtimeDll)
+
+if ($runtimeReady)
 {
-    Write-Host "CUDA Runtime $($config.version) already installed."
-    Write-Host "Location: $installDirectory"
-    exit 0
+    Write-Host "CUDA Runtime $($runtime.version) already installed."
 }
-
-
-#
-# Remove an incomplete installation.
-#
-
-if (Test-Path -Path $installDirectory)
+else
 {
-    Write-Host "Removing incomplete CUDA Runtime installation..."
+    if (Test-Path -Path $runtimeInstallDirectory)
+    {
+        Write-Host "Removing incomplete CUDA Runtime installation..."
 
-    Remove-Item `
-        -Path $installDirectory `
+        Remove-Item `
+            -Path $runtimeInstallDirectory `
+            -Recurse `
+            -Force
+    }
+
+    $runtimeArchive = Join-Path `
+        -Path $cacheDirectory `
+        -ChildPath $runtime.archiveName
+
+    if (-not (Test-Path -Path $runtimeArchive -PathType Leaf))
+    {
+        Write-Host "Downloading CUDA Runtime $($runtime.version)..."
+
+        Invoke-WebRequest `
+            -Uri $runtime.downloadUrl `
+            -OutFile $runtimeArchive `
+            -UseBasicParsing
+    }
+
+    $expectedHash =
+        $runtime.sha256.ToUpperInvariant()
+
+    $actualHash = (
+        Get-FileHash `
+            -Path $runtimeArchive `
+            -Algorithm SHA256
+    ).Hash.ToUpperInvariant()
+
+    if ($actualHash -ne $expectedHash)
+    {
+        Remove-Item `
+            -Path $runtimeArchive `
+            -Force
+
+        throw "CUDA Runtime archive SHA-256 mismatch."
+    }
+
+    Write-Host "CUDA Runtime archive SHA-256 OK"
+
+    $runtimeTempDirectory = Join-Path `
+        -Path $cacheDirectory `
+        -ChildPath "cuda-cudart-$($runtime.version)-extract"
+
+    if (Test-Path -Path $runtimeTempDirectory)
+    {
+        Remove-Item `
+            -Path $runtimeTempDirectory `
+            -Recurse `
+            -Force
+    }
+
+    New-Item `
+        -ItemType Directory `
+        -Path $runtimeTempDirectory `
+        -Force |
+        Out-Null
+
+    Expand-Archive `
+        -Path $runtimeArchive `
+        -DestinationPath $runtimeTempDirectory
+
+    $runtimeHeaderInArchive = Get-ChildItem `
+        -Path $runtimeTempDirectory `
+        -Filter "cuda_runtime_api.h" `
         -Recurse `
-        -Force
-}
+        -File |
+        Select-Object -First 1
 
+    if ($null -eq $runtimeHeaderInArchive)
+    {
+        throw "cuda_runtime_api.h was not found in the CUDA Runtime archive."
+    }
 
-#
-# Prepare download directory.
-#
+    $runtimeIncludeDirectory = Split-Path `
+        -Path $runtimeHeaderInArchive.FullName `
+        -Parent
 
-New-Item `
-    -ItemType Directory `
-    -Path $cacheDirectory `
-    -Force |
-    Out-Null
+    $runtimePackageRoot = Split-Path `
+        -Path $runtimeIncludeDirectory `
+        -Parent
 
+    $runtimeLibraryInArchive = Join-Path `
+        -Path $runtimePackageRoot `
+        -ChildPath "lib\x64\cudart.lib"
 
-#
-# Download the pinned NVIDIA CUDA Runtime archive.
-#
+    $runtimeDllInArchive = Get-ChildItem `
+        -Path (
+            Join-Path `
+                -Path $runtimePackageRoot `
+                -ChildPath "bin\x64"
+        ) `
+        -Filter "cudart64_*.dll" `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
 
-if (-not (Test-Path -Path $archivePath -PathType Leaf))
-{
-    Write-Host "Downloading CUDA Runtime $($config.version)..."
+    if (-not (
+        Test-Path `
+            -Path $runtimeLibraryInArchive `
+            -PathType Leaf
+    ))
+    {
+        throw "cudart.lib was not found in the CUDA Runtime archive."
+    }
 
-    Invoke-WebRequest `
-        -Uri $config.downloadUrl `
-        -OutFile $archivePath `
-        -UseBasicParsing
-}
+    if ($null -eq $runtimeDllInArchive)
+    {
+        throw "CUDA Runtime DLL was not found in the archive."
+    }
 
+    New-Item `
+        -ItemType Directory `
+        -Path $runtimeInstallDirectory `
+        -Force |
+        Out-Null
 
-#
-# Verify SHA-256.
-#
-
-$expectedHash = $config.sha256.ToUpperInvariant()
-
-$actualHash = (
-    Get-FileHash `
-        -Path $archivePath `
-        -Algorithm SHA256
-).Hash.ToUpperInvariant()
-
-if ($actualHash -ne $expectedHash)
-{
-    Remove-Item `
-        -Path $archivePath `
-        -Force
-
-    throw @"
-CUDA Runtime archive SHA-256 mismatch.
-
-Expected:
-$expectedHash
-
-Actual:
-$actualHash
-
-The downloaded archive was deleted.
-"@
-}
-
-Write-Host "CUDA Runtime archive SHA-256 OK"
-
-
-#
-# Extract into a temporary directory.
-#
-
-$tempDirectory = Join-Path `
-    -Path $cacheDirectory `
-    -ChildPath "cuda-cudart-$($config.version)-extract"
-
-if (Test-Path -Path $tempDirectory)
-{
-    Remove-Item `
-        -Path $tempDirectory `
-        -Recurse `
-        -Force
-}
-
-New-Item `
-    -ItemType Directory `
-    -Path $tempDirectory `
-    -Force |
-    Out-Null
-
-Expand-Archive `
-    -Path $archivePath `
-    -DestinationPath $tempDirectory
-
-
-#
-# Locate the CUDA Runtime package root.
-#
-
-$runtimeHeader = Get-ChildItem `
-    -Path $tempDirectory `
-    -Filter "cuda_runtime_api.h" `
-    -Recurse `
-    -File |
-    Select-Object -First 1
-
-if ($null -eq $runtimeHeader)
-{
-    Remove-Item `
-        -Path $tempDirectory `
-        -Recurse `
-        -Force
-
-    throw "cuda_runtime_api.h was not found in the CUDA Runtime archive."
-}
-
-$includeDirectory = Split-Path `
-    -Path $runtimeHeader.FullName `
-    -Parent
-
-$packageRoot = Split-Path `
-    -Path $includeDirectory `
-    -Parent
-
-
-#
-# Verify expected files inside the extracted archive.
-#
-
-$archiveLibrary = Join-Path `
-    -Path $packageRoot `
-    -ChildPath "lib\x64\cudart.lib"
-
-$archiveDllDirectory = Join-Path `
-    -Path $packageRoot `
-    -ChildPath "bin\x64"
-
-$archiveDll = Get-ChildItem `
-    -Path $archiveDllDirectory `
-    -Filter "cudart64_*.dll" `
-    -File `
-    -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-
-if (-not (Test-Path -Path $archiveLibrary -PathType Leaf))
-{
-    Remove-Item `
-        -Path $tempDirectory `
+    Copy-Item `
+        -Path (
+            Join-Path `
+                -Path $runtimePackageRoot `
+                -ChildPath "*"
+        ) `
+        -Destination $runtimeInstallDirectory `
         -Recurse `
         -Force
 
-    throw "cudart.lib was not found in the CUDA Runtime archive."
-}
-
-if ($null -eq $archiveDll)
-{
     Remove-Item `
-        -Path $tempDirectory `
+        -Path $runtimeTempDirectory `
         -Recurse `
         -Force
 
-    throw "CUDA Runtime DLL was not found in the archive."
+    if (-not (
+        Test-Path `
+            -Path $runtimeHeader `
+            -PathType Leaf
+    ))
+    {
+        throw "CUDA Runtime header missing after installation."
+    }
+
+    if (-not (
+        Test-Path `
+            -Path $runtimeLibrary `
+            -PathType Leaf
+    ))
+    {
+        throw "CUDA Runtime library missing after installation."
+    }
+
+    $runtimeDll = Get-ChildItem `
+        -Path $runtimeDllDirectory `
+        -Filter "cudart64_*.dll" `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    if ($null -eq $runtimeDll)
+    {
+        throw "CUDA Runtime DLL missing after installation."
+    }
+
+    Write-Host "CUDA Runtime $($runtime.version) ready."
 }
 
 
 #
-# Install the project-local CUDA Runtime.
+# CUDA CRT
 #
 
-New-Item `
-    -ItemType Directory `
-    -Path $installDirectory `
-    -Force |
-    Out-Null
+$crtInstallDirectory = Join-Path `
+    -Path $repoRoot `
+    -ChildPath $crt.installDirectory
 
-Copy-Item `
-    -Path (
-        Join-Path `
-            -Path $packageRoot `
-            -ChildPath "*"
-    ) `
-    -Destination $installDirectory `
-    -Recurse
+$crtHeader = Join-Path `
+    -Path $crtInstallDirectory `
+    -ChildPath "include\crt\host_defines.h"
 
-
-#
-# Remove temporary extraction directory.
-#
-
-Remove-Item `
-    -Path $tempDirectory `
-    -Recurse `
-    -Force
-
-
-#
-# Verify the completed installation.
-#
-
-if (-not (Test-Path -Path $headerPath -PathType Leaf))
+if (Test-Path -Path $crtHeader -PathType Leaf)
 {
-    throw "CUDA Runtime header missing after installation: $headerPath"
+    Write-Host "CUDA CRT $($crt.version) already installed."
 }
-
-if (-not (Test-Path -Path $libraryPath -PathType Leaf))
+else
 {
-    throw "CUDA Runtime library missing after installation: $libraryPath"
-}
+    if (Test-Path -Path $crtInstallDirectory)
+    {
+        Write-Host "Removing incomplete CUDA CRT installation..."
 
-$dll = Get-ChildItem `
-    -Path $dllDirectory `
-    -Filter "cudart64_*.dll" `
-    -File `
-    -ErrorAction SilentlyContinue |
-    Select-Object -First 1
+        Remove-Item `
+            -Path $crtInstallDirectory `
+            -Recurse `
+            -Force
+    }
 
-if ($null -eq $dll)
-{
-    throw "CUDA Runtime DLL missing after installation."
+    $crtArchive = Join-Path `
+        -Path $cacheDirectory `
+        -ChildPath $crt.archiveName
+
+    if (-not (Test-Path -Path $crtArchive -PathType Leaf))
+    {
+        Write-Host "Downloading CUDA CRT $($crt.version)..."
+
+        Invoke-WebRequest `
+            -Uri $crt.downloadUrl `
+            -OutFile $crtArchive `
+            -UseBasicParsing
+    }
+
+    $expectedHash =
+        $crt.sha256.ToUpperInvariant()
+
+    $actualHash = (
+        Get-FileHash `
+            -Path $crtArchive `
+            -Algorithm SHA256
+    ).Hash.ToUpperInvariant()
+
+    if ($actualHash -ne $expectedHash)
+    {
+        Remove-Item `
+            -Path $crtArchive `
+            -Force
+
+        throw "CUDA CRT archive SHA-256 mismatch."
+    }
+
+    Write-Host "CUDA CRT archive SHA-256 OK"
+
+    $crtTempDirectory = Join-Path `
+        -Path $cacheDirectory `
+        -ChildPath "cuda-crt-$($crt.version)-extract"
+
+    if (Test-Path -Path $crtTempDirectory)
+    {
+        Remove-Item `
+            -Path $crtTempDirectory `
+            -Recurse `
+            -Force
+    }
+
+    New-Item `
+        -ItemType Directory `
+        -Path $crtTempDirectory `
+        -Force |
+        Out-Null
+
+    Expand-Archive `
+        -Path $crtArchive `
+        -DestinationPath $crtTempDirectory
+
+    $crtHeaderInArchive = Get-ChildItem `
+        -Path $crtTempDirectory `
+        -Filter "host_defines.h" `
+        -Recurse `
+        -File |
+        Where-Object {
+            $_.FullName -match `
+                "[\\/]include[\\/]crt[\\/]host_defines\.h$"
+        } |
+        Select-Object -First 1
+
+    if ($null -eq $crtHeaderInArchive)
+    {
+        throw "crt/host_defines.h was not found in the CUDA CRT archive."
+    }
+
+    $crtDirectory = Split-Path `
+        -Path $crtHeaderInArchive.FullName `
+        -Parent
+
+    $crtIncludeDirectory = Split-Path `
+        -Path $crtDirectory `
+        -Parent
+
+    $crtPackageRoot = Split-Path `
+        -Path $crtIncludeDirectory `
+        -Parent
+
+    New-Item `
+        -ItemType Directory `
+        -Path $crtInstallDirectory `
+        -Force |
+        Out-Null
+
+    Copy-Item `
+        -Path (
+            Join-Path `
+                -Path $crtPackageRoot `
+                -ChildPath "*"
+        ) `
+        -Destination $crtInstallDirectory `
+        -Recurse `
+        -Force
+
+    Remove-Item `
+        -Path $crtTempDirectory `
+        -Recurse `
+        -Force
+
+    if (-not (
+        Test-Path `
+            -Path $crtHeader `
+            -PathType Leaf
+    ))
+    {
+        throw "CUDA CRT header missing after installation: $crtHeader"
+    }
+
+    Write-Host "CUDA CRT $($crt.version) ready."
 }
 
 
 #
-# Success.
+# Success
 #
 
-Write-Host "CUDA Runtime $($config.version) ready."
-Write-Host "Location: $installDirectory"
-Write-Host "DLL: $($dll.FullName)"
+Write-Host ""
+Write-Host "CUDA project-local foundation ready."
+Write-Host "Runtime: $runtimeInstallDirectory"
+Write-Host "CRT:     $crtInstallDirectory"

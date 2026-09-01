@@ -108,6 +108,38 @@ endif()
 
 
 #
+# Project-local CUDA CRT
+#
+
+string(
+    JSON
+    GSRECON_CUDA_CRT_DIRECTORY
+    GET
+    "${GSRECON_TOOL_VERSIONS_JSON}"
+    cudaCrt
+    installDirectory
+)
+
+set(
+    GSRECON_CUDA_CRT_ROOT
+    "${CMAKE_SOURCE_DIR}/${GSRECON_CUDA_CRT_DIRECTORY}"
+)
+
+set(
+    GSRECON_CUDA_CRT_INCLUDE_DIR
+    "${GSRECON_CUDA_CRT_ROOT}/include"
+)
+
+if(NOT EXISTS "${GSRECON_CUDA_CRT_INCLUDE_DIR}/crt/host_defines.h")
+    message(
+        FATAL_ERROR
+        "CUDA CRT headers not found. "
+        "Run tools/bootstrap-cuda.ps1 first."
+    )
+endif()
+
+
+#
 # Vulkan source dependencies
 #
 
@@ -140,13 +172,14 @@ add_executable(
 
 
 #
-# CUDA Runtime headers
+# CUDA headers
 #
 
 target_include_directories(
     gsrecon
     PRIVATE
         "${GSRECON_CUDA_INCLUDE_DIR}"
+        "${GSRECON_CUDA_CRT_INCLUDE_DIR}"
 )
 
 

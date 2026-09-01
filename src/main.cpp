@@ -1,8 +1,10 @@
 
-
 #include <Windows.h>
+#include <cuda_runtime_api.h>
 #include <cstdio>
 #include <iostream>
+#include <cstring>
+#include <vector>
 
 
 #ifdef GSRECON_ENABLE_DEBUG_CONSOLE
@@ -26,7 +28,6 @@ void attachDebugConsole()
 #include "vulkan_frame.hpp"
 #include "shader.hpp"
 
-#include <vector>
 
 
 VkResult acquireSwapchainImage(
@@ -242,6 +243,55 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 
 
 
+bool selectCudaDeviceForVulkan(VkPhysicalDevice physicalDevice)
+{
+    VkPhysicalDeviceIDProperties idProperties{};
+    idProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+
+    VkPhysicalDeviceProperties2 properties{};
+    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    properties.pNext = &idProperties;
+
+    vkGetPhysicalDeviceProperties2(physicalDevice, &properties);
+
+    int deviceCount = 0;
+
+    if (cudaGetDeviceCount(&deviceCount) != cudaSuccess || deviceCount == 0)
+    {
+        return false;
+    }
+
+    for (int device = 0; device < deviceCount; ++device)
+    {
+        cudaDeviceProp cudaProperties{};
+
+        if (cudaGetDeviceProperties(&cudaProperties, device) != cudaSuccess)
+        {
+            continue;
+        }
+
+        if (std::memcmp(&cudaProperties.uuid, idProperties.deviceUUID, VK_UUID_SIZE) != 0)
+        {
+            continue;
+        }
+
+        if (cudaSetDevice(device) != cudaSuccess)
+        {
+            return false;
+        }
+
+#ifdef GSRECON_ENABLE_DEBUG_CONSOLE
+        std::printf("CUDA device matched Vulkan: %s\n", cudaProperties.name);
+#endif
+
+        return true;
+    }
+
+    return false;
+}
+
+
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
 #ifdef GSRECON_ENABLE_DEBUG_CONSOLE
@@ -283,6 +333,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	if (!vulkan.init(hInstance, window))
 	{
 	    return 0;
+	}
+
+	if (!selectCudaDeviceForVulkan(vulkan.physicalDevice()))
+	{
+	    return -1;
 	}
 
 	VkShaderModule computeShaderModule = VK_NULL_HANDLE;

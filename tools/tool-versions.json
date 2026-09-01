@@ -25,5 +25,12 @@
         "downloadUrl": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-13.3.29-archive.zip",
         "sha256": "1feb7dd266813ffe8dbc24e115183a5ac35a4795c8d34aca0df85ab616b64d9c",
         "installDirectory": ".tools/cuda/13.3.1/cudart"
+    },
+    "cudaCrt": {
+        "version": "13.3.73",
+        "archiveName": "cuda_crt-windows-x86_64-13.3.73-archive.zip",
+        "downloadUrl": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_crt/windows-x86_64/cuda_crt-windows-x86_64-13.3.73-archive.zip",
+        "sha256": "9227ec7c80db10b7cb0d4ee71ed62ec7ae36e67890216413ab6f9afa35d577f0",
+        "installDirectory": ".tools/cuda/13.3.1/crt"
     }
 }
