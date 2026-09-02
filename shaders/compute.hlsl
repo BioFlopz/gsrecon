@@ -1,9 +1,25 @@
+struct GaussianGpuData
+{
+    float3 position;
+    float opacity;
+
+    float3 scale;
+    float padding0;
+
+    float4 rotation;
+
+    float3 color;
+    float padding1;
+};
 
 [[vk::binding(0, 0)]]
-RWStructuredBuffer<uint> values;
+RWStructuredBuffer<GaussianGpuData> gaussians;
 
-[numthreads(4, 1, 1)]
+[numthreads(1, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    values[dispatchThreadId.x] += 1;
+    if (dispatchThreadId.x == 0)
+    {
+        gaussians[0].position.x += 1.0f;
+    }
 }
