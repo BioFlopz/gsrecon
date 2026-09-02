@@ -8,6 +8,16 @@ __global__ void cudaKernelSmoke(int* value)
     }
 }
 
+__global__ void cudaExternalMemorySmoke(unsigned int* values)
+{
+    const unsigned int i = threadIdx.x;
+
+    if (i < 4)
+    {
+        values[i] = i + 10;
+    }
+}
+
 extern "C" bool runCudaKernelSmoke()
 {
     int* deviceValue = nullptr;
@@ -38,4 +48,35 @@ extern "C" bool runCudaKernelSmoke()
     cudaFree(deviceValue);
 
     return copyResult == cudaSuccess && hostValue == 1;
+}
+
+
+extern "C" bool runCudaExternalMemorySmoke(void* mappedStorage)
+{
+    auto* values = static_cast<unsigned int*>(mappedStorage);
+
+    cudaExternalMemorySmoke<<<1, 4>>>(values);
+
+    if (cudaGetLastError() != cudaSuccess)
+    {
+        return false;
+    }
+
+    if (cudaDeviceSynchronize() != cudaSuccess)
+    {
+        return false;
+    }
+
+    unsigned int hostValues[4]{};
+
+    if (cudaMemcpy(hostValues, values, sizeof(hostValues), cudaMemcpyDeviceToHost) != cudaSuccess)
+    {
+        return false;
+    }
+
+    return
+        hostValues[0] == 10 &&
+        hostValues[1] == 11 &&
+        hostValues[2] == 12 &&
+        hostValues[3] == 13;
 }

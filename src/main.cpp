@@ -1,5 +1,6 @@
 
 extern "C" bool runCudaKernelSmoke();
+extern "C" bool runCudaExternalMemorySmoke(void* mappedStorage);
 
 #include <Windows.h>
 #include <cuda_runtime_api.h>
@@ -285,7 +286,7 @@ bool selectCudaDeviceForVulkan(VkPhysicalDevice physicalDevice)
 		if (!runCudaKernelSmoke())
 		{
 		    std::cerr << "CUDA kernel: FAILED\n";
-		    return 1;
+		    return false;
 		}
 
 		std::cout << "CUDA kernel: OK\n";
@@ -467,6 +468,18 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    }
 	}
 
+	if (storageMemoryType == UINT32_MAX)
+	{
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr
+	    );
+
+	    return EXIT_FAILURE;
+	}
+
 	VkDeviceMemory storageMemory = VK_NULL_HANDLE;
 
 	VkExportMemoryAllocateInfo exportInfo{};
@@ -475,6 +488,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	VkMemoryAllocateInfo allocationInfo{};
 	allocationInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocationInfo.pNext = &exportInfo;
 	allocationInfo.allocationSize = storageMemoryRequirements.size;
 	allocationInfo.memoryTypeIndex = storageMemoryType;
 
@@ -497,6 +511,128 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
 
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	auto getMemoryWin32Handle = reinterpret_cast<PFN_vkGetMemoryWin32HandleKHR>(vkGetDeviceProcAddr(vulkan.device(), "vkGetMemoryWin32HandleKHR"));
+
+	if (getMemoryWin32Handle == nullptr)
+	{
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	VkMemoryGetWin32HandleInfoKHR handleInfo{};
+	handleInfo.sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR;
+	handleInfo.memory = storageMemory;
+	handleInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+	HANDLE storageMemoryHandle = nullptr;
+
+	if (getMemoryWin32Handle(vulkan.device(), &handleInfo, &storageMemoryHandle) != VK_SUCCESS)
+	{
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "Vulkan external memory handle: OK\n";
+
+	cudaExternalMemoryHandleDesc cudaHandleInfo{};
+	cudaHandleInfo.type = cudaExternalMemoryHandleTypeOpaqueWin32;
+	cudaHandleInfo.handle.win32.handle = storageMemoryHandle;
+	cudaHandleInfo.size = static_cast<unsigned long long>(storageMemoryRequirements.size);
+	cudaHandleInfo.flags = 0;
+
+	cudaExternalMemory_t cudaStorageMemory = nullptr;
+
+	const cudaError_t importResult = cudaImportExternalMemory(&cudaStorageMemory, &cudaHandleInfo);
+
+	// CUDA does not take ownership of an OPAQUE_WIN32 NT handle.
+	CloseHandle(storageMemoryHandle);
+	storageMemoryHandle = nullptr;
+
+	if (importResult != cudaSuccess)
+	{
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "CUDA external memory import: OK\n";
+
+	cudaExternalMemoryBufferDesc cudaBufferInfo{};
+	cudaBufferInfo.offset = 0;
+	cudaBufferInfo.size = static_cast<unsigned long long>(storageMemoryRequirements.size);
+	cudaBufferInfo.flags = 0;
+
+	void* cudaMappedStorage = nullptr;
+
+	const cudaError_t mapResult = cudaExternalMemoryGetMappedBuffer(&cudaMappedStorage, cudaStorageMemory, &cudaBufferInfo);
+
+	if (mapResult != cudaSuccess)
+	{
+	    std::cerr << "CUDA external memory map failed: " << cudaGetErrorString(mapResult) << '\n';
+
+	    cudaDestroyExternalMemory(cudaStorageMemory);
+
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "CUDA external memory map: OK\n";
+
+	if (!runCudaExternalMemorySmoke(cudaMappedStorage))
+	{
+	    std::cerr << "CUDA external memory smoke: FAILED\n";
+
+	    cudaFree(cudaMappedStorage);
+	    cudaDestroyExternalMemory(cudaStorageMemory);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "CUDA external memory smoke: OK\n";
+
+	if (cudaFree(cudaMappedStorage) != cudaSuccess)
+	{
+	    cudaDestroyExternalMemory(cudaStorageMemory);
+
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	if (cudaDestroyExternalMemory(cudaStorageMemory) != cudaSuccess)
+	{
+	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+
+	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
 	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
 
 	    return EXIT_FAILURE;
