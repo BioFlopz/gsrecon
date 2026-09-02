@@ -1,5 +1,8 @@
 #include <cuda_runtime.h>
 
+#include "gaussian.hpp"
+
+
 __global__ void cudaKernelSmoke(int* value)
 {
     if (threadIdx.x == 0)
