@@ -149,6 +149,26 @@ bool supportsRequiredDeviceExtensions(VkPhysicalDevice device)
     return true;
 }
 
+
+bool supportsExternalStorageBuffer(VkPhysicalDevice device)
+{
+    VkPhysicalDeviceExternalBufferInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO;
+    info.flags = 0;
+    info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+    VkExternalBufferProperties properties{};
+    properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES;
+
+    vkGetPhysicalDeviceExternalBufferProperties(device, &info, &properties);
+
+    const VkExternalMemoryFeatureFlags features = properties.externalMemoryProperties.externalMemoryFeatures;
+
+    return (features & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0 && (features & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT) == 0;
+}
+
+
 QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface)
 {
     uint32_t count = 0;
@@ -342,6 +362,11 @@ bool VulkanContext::selectPhysicalDevice()
         }
 
         if (!supportsRequiredDeviceExtensions(device))
+        {
+            continue;
+        }
+
+        if (!supportsExternalStorageBuffer(device))
         {
             continue;
         }

@@ -186,7 +186,7 @@ set(
 
 set(
     GSRECON_CUDA_KERNEL_OBJECT
-    "${CMAKE_BINARY_DIR}/cuda/cuda_kernel.obj"
+    "${CMAKE_BINARY_DIR}/cuda/$<CONFIG>/cuda_kernel.obj"
 )
 
 add_custom_command(
@@ -197,13 +197,13 @@ add_custom_command(
         "${CMAKE_COMMAND}"
         -E
         make_directory
-        "${CMAKE_BINARY_DIR}/cuda"
+        "${CMAKE_BINARY_DIR}/cuda/$<CONFIG>"
 
     COMMAND
         "${GSRECON_NVCC}"
         --std=c++20
         --gpu-architecture=sm_75
-        --compiler-options=/MD
+        "--compiler-options=$<IF:$<CONFIG:Debug>,/MDd,/MD>"
         --compile
         --include-path "${GSRECON_CUDA_INCLUDE_DIR}"
         --include-path "${GSRECON_CUDA_CRT_INCLUDE_DIR}"

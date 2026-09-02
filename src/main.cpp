@@ -427,6 +427,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
+	VkExternalMemoryBufferCreateInfo externalBufferInfo{};
+	externalBufferInfo.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+	externalBufferInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+	bufferInfo.pNext = &externalBufferInfo;
+
 	if (vkCreateBuffer(vulkan.device(), &bufferInfo, nullptr, &storageBuffer) != VK_SUCCESS)
 	{
 	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
@@ -462,6 +468,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	}
 
 	VkDeviceMemory storageMemory = VK_NULL_HANDLE;
+
+	VkExportMemoryAllocateInfo exportInfo{};
+	exportInfo.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+	exportInfo.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 
 	VkMemoryAllocateInfo allocationInfo{};
 	allocationInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
