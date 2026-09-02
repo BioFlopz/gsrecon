@@ -31,7 +31,7 @@ void attachDebugConsole()
 #include "vulkan_swapchain.hpp"
 #include "vulkan_frame.hpp"
 #include "shader.hpp"
-
+#include "gaussian.hpp"
 
 
 VkResult acquireSwapchainImage(VkDevice device, const VulkanSwapchain& swapchain, const VulkanFrame& frame, uint32_t& imageIndex)

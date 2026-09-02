@@ -305,10 +305,48 @@ add_custom_command(
     VERBATIM
 )
 
+set(
+    GSRECON_GAUSSIAN_CONTRACT_SHADER
+    "${CMAKE_SOURCE_DIR}/shaders/gaussian_contract.hlsl"
+)
+
+set(
+    GSRECON_GAUSSIAN_CONTRACT_SPV
+    "${CMAKE_BINARY_DIR}/shaders/gaussian_contract.spv"
+)
+
+add_custom_command(
+    OUTPUT
+        "${GSRECON_GAUSSIAN_CONTRACT_SPV}"
+
+    COMMAND
+        "${CMAKE_COMMAND}"
+        -E
+        make_directory
+        "${CMAKE_BINARY_DIR}/shaders"
+
+    COMMAND
+        "${GSRECON_DXC}"
+        -spirv
+        -T cs_6_0
+        -E main
+        "${GSRECON_GAUSSIAN_CONTRACT_SHADER}"
+        -Fo "${GSRECON_GAUSSIAN_CONTRACT_SPV}"
+
+    DEPENDS
+        "${GSRECON_GAUSSIAN_CONTRACT_SHADER}"
+
+    COMMENT
+        "Compiling gaussian_contract.hlsl"
+
+    VERBATIM
+)
+
 add_custom_target(
     gsrecon_shaders
     DEPENDS
         "${GSRECON_COMPUTE_SPV}"
+        "${GSRECON_GAUSSIAN_CONTRACT_SPV}"
 )
 
 add_dependencies(
