@@ -1,7 +1,8 @@
 
 extern "C" bool runCudaKernelSmoke();
 extern "C" bool runCudaExternalMemorySmoke(void* mappedStorage);
-extern "C" bool runCudaExternalMemoryWriteAsync(void* mappedStorage);
+extern "C" bool runCudaExternalGaussianWriteAsync(void* mappedStorage);
+extern "C" bool runCudaExternalGaussianSmoke(void* mappedStorage);
 
 #include <Windows.h>
 #include <cuda_runtime_api.h>
@@ -643,11 +644,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    return -1;
 	}
 
+	constexpr VkDeviceSize storageBufferSize = sizeof(GaussianGpuData);
+
 	VkBuffer storageBuffer = VK_NULL_HANDLE;
 
 	VkBufferCreateInfo bufferInfo{};
 	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufferInfo.size = sizeof(uint32_t) * 4;
+	bufferInfo.size = storageBufferSize;
 	bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -837,6 +840,18 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	std::cout << "CUDA external memory smoke: OK\n";
 
+	if (!runCudaExternalGaussianSmoke(cudaMappedStorage))
+	{
+	    std::cerr << "CUDA Gaussian shared memory smoke: FAILED\n";
+
+	    cudaFree(cudaMappedStorage);
+	    cudaDestroyExternalMemory(cudaStorageMemory);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "CUDA Gaussian shared memory smoke: OK\n";
+
 	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 
 	VkDescriptorPoolSize poolSize{};
@@ -892,7 +907,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	VkDescriptorBufferInfo storageBufferInfo{};
 	storageBufferInfo.buffer = storageBuffer;
 	storageBufferInfo.offset = 0;
-	storageBufferInfo.range = sizeof(uint32_t) * 4;
+	storageBufferInfo.range = storageBufferSize;
 
 	VkWriteDescriptorSet storageWrite{};
 	storageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1004,7 +1019,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    break;
 	}
 
-	if (!runCudaExternalMemoryWriteAsync(cudaMappedStorage))
+	if (!runCudaExternalGaussianWriteAsync(cudaMappedStorage))
 	{
 	    std::cerr << "Frame CUDA shared write: FAILED\n";
 	    exitCode = -1;
@@ -1077,22 +1092,35 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	void* mappedReadback = nullptr;
 
-	if (vkMapMemory(vulkan.device(), storageMemory, 0, sizeof(uint32_t) * 4, 0, &mappedReadback) == VK_SUCCESS)
+	if (vkMapMemory(vulkan.device(), storageMemory, 0, sizeof(GaussianGpuData), 0, &mappedReadback) == VK_SUCCESS)
 	{
-	    const auto* values = static_cast<const uint32_t*>(mappedReadback);
+	    const auto* gaussian = static_cast<const GaussianGpuData*>(mappedReadback);
 
-		storageReadbackOk =
-		    values[0] == 11 &&
-		    values[1] == 12 &&
-		    values[2] == 13 &&
-		    values[3] == 14;
+	    storageReadbackOk =
+	        gaussian->position[0] == 1.0f &&
+	        gaussian->position[1] == 0.0f &&
+	        gaussian->position[2] == 0.0f &&
+
+	        gaussian->opacity == 1.0f &&
+
+	        gaussian->scale[0] == 0.25f &&
+	        gaussian->scale[1] == 0.25f &&
+	        gaussian->scale[2] == 0.25f &&
+
+	        gaussian->rotation[0] == 1.0f &&
+	        gaussian->rotation[1] == 0.0f &&
+	        gaussian->rotation[2] == 0.0f &&
+	        gaussian->rotation[3] == 0.0f &&
+
+	        gaussian->color[0] == 1.0f &&
+	        gaussian->color[1] == 0.0f &&
+	        gaussian->color[2] == 0.0f;
 
 	    std::cout
-	        << "Storage buffer: "
-	        << values[0] << ' '
-	        << values[1] << ' '
-	        << values[2] << ' '
-	        << values[3] << '\n';
+	        << "Gaussian buffer position: "
+	        << gaussian->position[0] << ' '
+	        << gaussian->position[1] << ' '
+	        << gaussian->position[2] << '\n';
 
 	    vkUnmapMemory(vulkan.device(), storageMemory);
 	}
