@@ -80,3 +80,12 @@ extern "C" bool runCudaExternalMemorySmoke(void* mappedStorage)
         hostValues[2] == 12 &&
         hostValues[3] == 13;
 }
+
+extern "C" bool runCudaExternalMemoryWriteAsync(void* mappedStorage)
+{
+    auto* values = static_cast<unsigned int*>(mappedStorage);
+
+    cudaExternalMemorySmoke<<<1, 4>>>(values);
+
+    return cudaGetLastError() == cudaSuccess;
+}
