@@ -346,6 +346,232 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    return 0;
 	}
 
+	VkExportSemaphoreCreateInfo exportSemaphoreInfo{};
+	exportSemaphoreInfo.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
+	exportSemaphoreInfo.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+	VkSemaphoreCreateInfo semaphoreInfo{};
+	semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	semaphoreInfo.pNext = &exportSemaphoreInfo;
+
+	VkSemaphore externalSemaphore = VK_NULL_HANDLE;
+
+	if (vkCreateSemaphore(vulkan.device(), &semaphoreInfo, nullptr, &externalSemaphore) != VK_SUCCESS)
+	{
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "Vulkan external semaphore: OK\n";
+
+	auto getSemaphoreWin32Handle = reinterpret_cast<PFN_vkGetSemaphoreWin32HandleKHR>(vkGetDeviceProcAddr(vulkan.device(), "vkGetSemaphoreWin32HandleKHR"));
+
+	if (getSemaphoreWin32Handle == nullptr)
+	{
+	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	VkSemaphoreGetWin32HandleInfoKHR semaphoreHandleInfo{};
+	semaphoreHandleInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR;
+	semaphoreHandleInfo.semaphore = externalSemaphore;
+	semaphoreHandleInfo.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+	HANDLE externalSemaphoreHandle = nullptr;
+
+	if (getSemaphoreWin32Handle(vulkan.device(), &semaphoreHandleInfo, &externalSemaphoreHandle) != VK_SUCCESS)
+	{
+	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "Vulkan external semaphore handle: OK\n";
+
+	cudaExternalSemaphoreHandleDesc cudaSemaphoreHandleInfo{};
+	cudaSemaphoreHandleInfo.type = cudaExternalSemaphoreHandleTypeOpaqueWin32;
+	cudaSemaphoreHandleInfo.handle.win32.handle = externalSemaphoreHandle;
+	cudaSemaphoreHandleInfo.flags = 0;
+
+	cudaExternalSemaphore_t cudaExternalSemaphore = nullptr;
+
+	const cudaError_t semaphoreImportResult = cudaImportExternalSemaphore(&cudaExternalSemaphore, &cudaSemaphoreHandleInfo);
+
+	// CUDA does not take ownership of the Win32 NT handle.
+	CloseHandle(externalSemaphoreHandle);
+	externalSemaphoreHandle = nullptr;
+
+	if (semaphoreImportResult != cudaSuccess)
+	{
+	    std::cerr << "CUDA external semaphore import failed: " << cudaGetErrorString(semaphoreImportResult) << '\n';
+
+	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "CUDA external semaphore import: OK\n";
+
+	VkSemaphoreSubmitInfo externalSignalInfo{};
+	externalSignalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+	externalSignalInfo.semaphore = externalSemaphore;
+	externalSignalInfo.value = 0;
+	externalSignalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+	VkSubmitInfo2 externalSignalSubmit{};
+	externalSignalSubmit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+	externalSignalSubmit.signalSemaphoreInfoCount = 1;
+	externalSignalSubmit.pSignalSemaphoreInfos = &externalSignalInfo;
+
+	if (vkQueueSubmit2(vulkan.graphicsQueue(), 1, &externalSignalSubmit, VK_NULL_HANDLE) != VK_SUCCESS)
+	{
+	    cudaDestroyExternalSemaphore(cudaExternalSemaphore);
+	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	cudaExternalSemaphoreWaitParams cudaWaitParams{};
+	cudaWaitParams.flags = 0;
+
+	const cudaError_t cudaWaitResult = cudaWaitExternalSemaphoresAsync(&cudaExternalSemaphore, &cudaWaitParams, 1, 0);
+
+	if (cudaWaitResult != cudaSuccess || cudaDeviceSynchronize() != cudaSuccess)
+	{
+	    std::cerr << "CUDA external semaphore wait: FAILED\n";
+
+	    vkQueueWaitIdle(vulkan.graphicsQueue());
+
+	    cudaDestroyExternalSemaphore(cudaExternalSemaphore);
+	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "Vulkan -> CUDA semaphore sync: OK\n";
+
+	VkSemaphore cudaToVulkanSemaphore = VK_NULL_HANDLE;
+
+	if (vkCreateSemaphore(vulkan.device(), &semaphoreInfo, nullptr, &cudaToVulkanSemaphore) != VK_SUCCESS)
+	{
+	    cudaDestroyExternalSemaphore(cudaExternalSemaphore);
+
+	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "Vulkan CUDA -> Vulkan semaphore: OK\n";
+
+	VkSemaphoreGetWin32HandleInfoKHR cudaToVulkanHandleInfo{};
+	cudaToVulkanHandleInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR;
+	cudaToVulkanHandleInfo.semaphore = cudaToVulkanSemaphore;
+	cudaToVulkanHandleInfo.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+	HANDLE cudaToVulkanHandle = nullptr;
+
+	if (getSemaphoreWin32Handle(vulkan.device(), &cudaToVulkanHandleInfo, &cudaToVulkanHandle) != VK_SUCCESS)
+	{
+	    vkDestroySemaphore(vulkan.device(), cudaToVulkanSemaphore, nullptr);
+
+	    cudaDestroyExternalSemaphore(cudaExternalSemaphore);
+
+	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "Vulkan CUDA -> Vulkan semaphore handle: OK\n";
+
+	cudaExternalSemaphoreHandleDesc cudaToVulkanHandleDesc{};
+	cudaToVulkanHandleDesc.type = cudaExternalSemaphoreHandleTypeOpaqueWin32;
+	cudaToVulkanHandleDesc.handle.win32.handle = cudaToVulkanHandle;
+	cudaToVulkanHandleDesc.flags = 0;
+
+	cudaExternalSemaphore_t cudaToVulkanExternalSemaphore = nullptr;
+
+	const cudaError_t cudaToVulkanImportResult = cudaImportExternalSemaphore(&cudaToVulkanExternalSemaphore, &cudaToVulkanHandleDesc);
+
+	CloseHandle(cudaToVulkanHandle);
+	cudaToVulkanHandle = nullptr;
+
+	if (cudaToVulkanImportResult != cudaSuccess)
+	{
+	    std::cerr << "CUDA -> Vulkan semaphore import failed: " << cudaGetErrorString(cudaToVulkanImportResult) << '\n';
+
+	    vkDestroySemaphore(vulkan.device(), cudaToVulkanSemaphore, nullptr);
+
+	    cudaDestroyExternalSemaphore(cudaExternalSemaphore);
+
+	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "CUDA -> Vulkan semaphore import: OK\n";
+
+	cudaExternalSemaphoreSignalParams cudaSignalParams{};
+	cudaSignalParams.flags = 0;
+
+	const cudaError_t cudaSignalResult = cudaSignalExternalSemaphoresAsync(&cudaToVulkanExternalSemaphore, &cudaSignalParams, 1, 0);
+
+	if (cudaSignalResult != cudaSuccess)
+	{
+	    std::cerr << "CUDA -> Vulkan semaphore signal: FAILED\n";
+
+	    cudaDestroyExternalSemaphore(cudaToVulkanExternalSemaphore);
+
+	    vkDestroySemaphore(vulkan.device(), cudaToVulkanSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	VkSemaphoreSubmitInfo cudaToVulkanWaitInfo{};
+	cudaToVulkanWaitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+	cudaToVulkanWaitInfo.semaphore = cudaToVulkanSemaphore;
+	cudaToVulkanWaitInfo.value = 0;
+	cudaToVulkanWaitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+	VkSubmitInfo2 cudaToVulkanWaitSubmit{};
+	cudaToVulkanWaitSubmit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+	cudaToVulkanWaitSubmit.waitSemaphoreInfoCount = 1;
+	cudaToVulkanWaitSubmit.pWaitSemaphoreInfos = &cudaToVulkanWaitInfo;
+
+	if (vkQueueSubmit2(vulkan.graphicsQueue(), 1, &cudaToVulkanWaitSubmit, VK_NULL_HANDLE) != VK_SUCCESS)
+	{
+	    cudaDestroyExternalSemaphore(cudaToVulkanExternalSemaphore);
+
+	    vkDestroySemaphore(vulkan.device(), cudaToVulkanSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	if (vkQueueWaitIdle(vulkan.graphicsQueue()) != VK_SUCCESS)
+	{
+	    cudaDestroyExternalSemaphore(cudaToVulkanExternalSemaphore);
+
+	    vkDestroySemaphore(vulkan.device(), cudaToVulkanSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	std::cout << "CUDA -> Vulkan semaphore sync: OK\n";
+
+	cudaDestroyExternalSemaphore(cudaToVulkanExternalSemaphore);
+
+	vkDestroySemaphore(vulkan.device(), cudaToVulkanSemaphore, nullptr);
+
+	vkQueueWaitIdle(vulkan.graphicsQueue());
+
+	if (cudaDestroyExternalSemaphore(cudaExternalSemaphore) != cudaSuccess)
+	{
+	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	    return EXIT_FAILURE;
+	}
+
+	vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
 	if (!selectCudaDeviceForVulkan(vulkan.physicalDevice()))
 	{
 	    return -1;

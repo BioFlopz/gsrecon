@@ -168,6 +168,20 @@ bool supportsExternalStorageBuffer(VkPhysicalDevice device)
     return (features & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) != 0 && (features & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT) == 0;
 }
 
+bool supportsExternalSemaphore(VkPhysicalDevice device)
+{
+    VkPhysicalDeviceExternalSemaphoreInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO;
+    info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+
+    VkExternalSemaphoreProperties properties{};
+    properties.sType = VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES;
+
+    vkGetPhysicalDeviceExternalSemaphoreProperties(device, &info, &properties);
+
+    return (properties.externalSemaphoreFeatures & VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT) != 0;
+}
+
 
 QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface)
 {
@@ -367,6 +381,11 @@ bool VulkanContext::selectPhysicalDevice()
         }
 
         if (!supportsExternalStorageBuffer(device))
+        {
+            continue;
+        }
+
+        if (!supportsExternalSemaphore(device))
         {
             continue;
         }
