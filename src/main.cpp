@@ -1,6 +1,7 @@
 
 extern "C" bool runCudaKernelSmoke();
 extern "C" bool runCudaExternalMemorySmoke(void* mappedStorage);
+extern "C" bool runCudaExternalMemoryWriteAsync(void* mappedStorage);
 
 #include <Windows.h>
 #include <cuda_runtime_api.h>
@@ -33,11 +34,7 @@ void attachDebugConsole()
 
 
 
-VkResult acquireSwapchainImage(
-    VkDevice device,
-    const VulkanSwapchain& swapchain,
-    const VulkanFrame& frame,
-    uint32_t& imageIndex)
+VkResult acquireSwapchainImage(VkDevice device, const VulkanSwapchain& swapchain, const VulkanFrame& frame, uint32_t& imageIndex)
 {
     if (vkWaitForFences(device, 1, &frame.renderFence, VK_TRUE, UINT64_MAX) != VK_SUCCESS)
     {
@@ -172,33 +169,43 @@ bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain
 }
 
 
-bool submitClearFrame(VkDevice device, VkQueue graphicsQueue, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex)
+bool submitClearFrame(VkDevice device, VkQueue graphicsQueue, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkSemaphore cudaToVulkanSemaphore, VkSemaphore vulkanToCudaSemaphore)
 {
-    VkSemaphoreSubmitInfo waitInfo{};
-    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    waitInfo.semaphore = frame.imageAvailableSemaphore;
-    waitInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSemaphoreSubmitInfo waitInfos[2]{};
+
+    waitInfos[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    waitInfos[0].semaphore = frame.imageAvailableSemaphore;
+    waitInfos[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    waitInfos[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    waitInfos[1].semaphore = cudaToVulkanSemaphore;
+    waitInfos[1].stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 
     VkCommandBufferSubmitInfo commandInfo{};
     commandInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
     commandInfo.commandBuffer = frame.commandBuffer;
 
-    VkSemaphoreSubmitInfo signalInfo{};
-    signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    signalInfo.semaphore = swapchain.renderFinishedSemaphore(imageIndex);
-    signalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    VkSemaphoreSubmitInfo signalInfos[2]{};
+
+    signalInfos[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    signalInfos[0].semaphore = swapchain.renderFinishedSemaphore(imageIndex);
+    signalInfos[0].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
+    signalInfos[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    signalInfos[1].semaphore = vulkanToCudaSemaphore;
+    signalInfos[1].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 
     VkSubmitInfo2 submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
 
-    submitInfo.waitSemaphoreInfoCount = 1;
-    submitInfo.pWaitSemaphoreInfos = &waitInfo;
+    submitInfo.waitSemaphoreInfoCount = 2;
+    submitInfo.pWaitSemaphoreInfos = waitInfos;
 
     submitInfo.commandBufferInfoCount = 1;
     submitInfo.pCommandBufferInfos = &commandInfo;
 
-    submitInfo.signalSemaphoreInfoCount = 1;
-    submitInfo.pSignalSemaphoreInfos = &signalInfo;
+    submitInfo.signalSemaphoreInfoCount = 2;
+    submitInfo.pSignalSemaphoreInfos = signalInfos;
 
     if (vkResetFences(device, 1, &frame.renderFence) != VK_SUCCESS)
     {
@@ -344,6 +351,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	if (!vulkan.init(hInstance, window))
 	{
 	    return 0;
+	}
+
+	if (!selectCudaDeviceForVulkan(vulkan.physicalDevice()))
+	{
+	    return EXIT_FAILURE;
 	}
 
 	VkExportSemaphoreCreateInfo exportSemaphoreInfo{};
@@ -557,25 +569,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	std::cout << "CUDA -> Vulkan semaphore sync: OK\n";
 
-	cudaDestroyExternalSemaphore(cudaToVulkanExternalSemaphore);
-
-	vkDestroySemaphore(vulkan.device(), cudaToVulkanSemaphore, nullptr);
-
-	vkQueueWaitIdle(vulkan.graphicsQueue());
-
-	if (cudaDestroyExternalSemaphore(cudaExternalSemaphore) != cudaSuccess)
-	{
-	    vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
-
-	    return EXIT_FAILURE;
-	}
-
-	vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
-
-	if (!selectCudaDeviceForVulkan(vulkan.physicalDevice()))
-	{
-	    return -1;
-	}
+	// if (!selectCudaDeviceForVulkan(vulkan.physicalDevice()))
+	// {
+	//     return -1;
+	// }
 
 	VkShaderModule computeShaderModule = VK_NULL_HANDLE;
 
@@ -840,54 +837,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	std::cout << "CUDA external memory smoke: OK\n";
 
-	if (cudaFree(cudaMappedStorage) != cudaSuccess)
-	{
-	    cudaDestroyExternalMemory(cudaStorageMemory);
-
-	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
-	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
-	    return EXIT_FAILURE;
-	}
-
-	if (cudaDestroyExternalMemory(cudaStorageMemory) != cudaSuccess)
-	{
-	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
-	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
-	    return EXIT_FAILURE;
-	}
-
-	void* mappedStorageData = nullptr;
-
-	if (vkMapMemory(vulkan.device(), storageMemory, 0, sizeof(uint32_t) * 4, 0, &mappedStorageData) != VK_SUCCESS)
-	{
-	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
-
-	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
-	    return EXIT_FAILURE;
-	}
-
-	auto* storageValues = static_cast<uint32_t*>(mappedStorageData);
-
-	storageValues[0] = 0;
-	storageValues[1] = 0;
-	storageValues[2] = 0;
-	storageValues[3] = 0;
-
-	vkUnmapMemory(vulkan.device(), storageMemory);
-
 	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 
 	VkDescriptorPoolSize poolSize{};
@@ -998,7 +947,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    return -1;
 	}
 
-
+	if (vkQueueSubmit2(vulkan.graphicsQueue(), 1, &externalSignalSubmit, VK_NULL_HANDLE) != VK_SUCCESS)
+	{
+	    return EXIT_FAILURE;
+	}
 
 	MSG message{};
 	bool running = true;
@@ -1034,9 +986,38 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    break;
 	}
 
-	if (acquireResult != VK_SUCCESS &&
-	    acquireResult != VK_SUBOPTIMAL_KHR)
+	if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
 	{
+	    exitCode = -1;
+	    running = false;
+	    break;
+	}
+
+	cudaExternalSemaphoreWaitParams frameCudaWaitParams{};
+	frameCudaWaitParams.flags = 0;
+
+	if (cudaWaitExternalSemaphoresAsync(&cudaExternalSemaphore, &frameCudaWaitParams, 1, 0) != cudaSuccess)
+	{
+	    std::cerr << "Frame CUDA wait: FAILED\n";
+	    exitCode = -1;
+	    running = false;
+	    break;
+	}
+
+	if (!runCudaExternalMemoryWriteAsync(cudaMappedStorage))
+	{
+	    std::cerr << "Frame CUDA shared write: FAILED\n";
+	    exitCode = -1;
+	    running = false;
+	    break;
+	}
+
+	cudaExternalSemaphoreSignalParams frameCudaSignalParams{};
+	frameCudaSignalParams.flags = 0;
+
+	if (cudaSignalExternalSemaphoresAsync(&cudaToVulkanExternalSemaphore, &frameCudaSignalParams, 1, 0) != cudaSuccess)
+	{
+	    std::cerr << "Frame CUDA signal: FAILED\n";
 	    exitCode = -1;
 	    running = false;
 	    break;
@@ -1049,7 +1030,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    break;
 	}
 
-	if (!submitClearFrame(vulkan.device(), vulkan.graphicsQueue(), frame, swapchain, imageIndex))
+	if (!submitClearFrame(vulkan.device(), vulkan.graphicsQueue(), frame, swapchain, imageIndex, cudaToVulkanSemaphore, externalSemaphore))
 	{
 	    exitCode = -1;
 	    running = false;
@@ -1079,6 +1060,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    return -1;
 	}
 
+	const cudaError_t destroyCudaToVulkanSemaphoreResult = cudaDestroyExternalSemaphore(cudaToVulkanExternalSemaphore);
+	const cudaError_t destroyVulkanToCudaSemaphoreResult = cudaDestroyExternalSemaphore(cudaExternalSemaphore);
+
+	vkDestroySemaphore(vulkan.device(), cudaToVulkanSemaphore, nullptr);
+	vkDestroySemaphore(vulkan.device(), externalSemaphore, nullptr);
+
+	if (destroyCudaToVulkanSemaphoreResult != cudaSuccess || destroyVulkanToCudaSemaphoreResult != cudaSuccess)
+	{
+	    return EXIT_FAILURE;
+	}
+
 	vkDeviceWaitIdle(vulkan.device());
 
 	bool storageReadbackOk = false;
@@ -1089,11 +1081,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	{
 	    const auto* values = static_cast<const uint32_t*>(mappedReadback);
 
-	    storageReadbackOk =
-	        values[0] == 1 &&
-	        values[1] == 2 &&
-	        values[2] == 3 &&
-	        values[3] == 4;
+		storageReadbackOk =
+		    values[0] == 11 &&
+		    values[1] == 12 &&
+		    values[2] == 13 &&
+		    values[3] == 14;
 
 	    std::cout
 	        << "Storage buffer: "
@@ -1105,8 +1097,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    vkUnmapMemory(vulkan.device(), storageMemory);
 	}
 
-	vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
+	if (cudaFree(cudaMappedStorage) != cudaSuccess)
+	{
+	    return EXIT_FAILURE;
+	}
 
+	if (cudaDestroyExternalMemory(cudaStorageMemory) != cudaSuccess)
+	{
+	    return EXIT_FAILURE;
+	}
+
+	vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
 	vkFreeMemory(vulkan.device(), storageMemory, nullptr);
 
 	vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
