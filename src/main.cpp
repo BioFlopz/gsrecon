@@ -10,7 +10,7 @@ extern "C" bool runCudaExternalGaussianSmoke(void* mappedStorage);
 #include <iostream>
 #include <cstring>
 #include <vector>
-
+#include <cmath>
 
 #ifdef GSRECON_ENABLE_DEBUG_CONSOLE
 void attachDebugConsole()
@@ -33,7 +33,7 @@ void attachDebugConsole()
 #include "vulkan_frame.hpp"
 #include "shader.hpp"
 #include "gaussian.hpp"
-
+#include "camera.hpp"
 
 VkResult acquireSwapchainImage(VkDevice device, const VulkanSwapchain& swapchain, const VulkanFrame& frame, uint32_t& imageIndex)
 {
@@ -579,10 +579,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	gaussianStorageBinding.descriptorCount = 1;
 	gaussianStorageBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
+	VkDescriptorSetLayoutBinding cameraBinding{};
+	cameraBinding.binding = 1;
+	cameraBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	cameraBinding.descriptorCount = 1;
+	cameraBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+	VkDescriptorSetLayoutBinding gaussianBindings[] =
+	{
+	    gaussianStorageBinding,
+	    cameraBinding
+	};
+
 	VkDescriptorSetLayoutCreateInfo gaussianDescriptorSetLayoutInfo{};
 	gaussianDescriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	gaussianDescriptorSetLayoutInfo.bindingCount = 1;
-	gaussianDescriptorSetLayoutInfo.pBindings = &gaussianStorageBinding;
+	gaussianDescriptorSetLayoutInfo.bindingCount = 2;
+	gaussianDescriptorSetLayoutInfo.pBindings = gaussianBindings;
 
 	VkDescriptorSetLayout gaussianDescriptorSetLayout = VK_NULL_HANDLE;
 
@@ -771,17 +783,122 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	std::cout << "CUDA Gaussian shared memory smoke: OK\n";
 
+	const VkDeviceSize cameraBufferSize = sizeof(CameraGpuData);
+
+	VkBuffer cameraBuffer = VK_NULL_HANDLE;
+
+	VkBufferCreateInfo cameraBufferInfo{};
+	cameraBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	cameraBufferInfo.size = cameraBufferSize;
+	cameraBufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	cameraBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	if (vkCreateBuffer(vulkan.device(), &cameraBufferInfo, nullptr, &cameraBuffer) != VK_SUCCESS)
+	{
+	    std::cerr << "Failed to create camera buffer.\n";
+	    return EXIT_FAILURE;
+	}
+
+	VkMemoryRequirements cameraMemoryRequirements{};
+
+	vkGetBufferMemoryRequirements(vulkan.device(), cameraBuffer, &cameraMemoryRequirements);
+
+	VkPhysicalDeviceMemoryProperties cameraMemoryProperties{};
+
+	vkGetPhysicalDeviceMemoryProperties(vulkan.physicalDevice(), &cameraMemoryProperties);
+
+	constexpr VkMemoryPropertyFlags cameraRequiredMemoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+	uint32_t cameraMemoryType = UINT32_MAX;
+
+	for (uint32_t i = 0; i < cameraMemoryProperties.memoryTypeCount; ++i)
+	{
+	    const bool supportedByBuffer = (cameraMemoryRequirements.memoryTypeBits & (1u << i)) != 0;
+
+	    const bool hasRequiredProperties = (cameraMemoryProperties.memoryTypes[i].propertyFlags & cameraRequiredMemoryProperties) == cameraRequiredMemoryProperties;
+
+	    if (supportedByBuffer && hasRequiredProperties)
+	    {
+	        cameraMemoryType = i;
+	        break;
+	    }
+	}
+
+	if (cameraMemoryType == UINT32_MAX)
+	{
+	    vkDestroyBuffer(vulkan.device(), cameraBuffer, nullptr);
+
+	    std::cerr << "No suitable camera memory type.\n";
+	    return EXIT_FAILURE;
+	}
+
+	VkDeviceMemory cameraMemory = VK_NULL_HANDLE;
+
+	VkMemoryAllocateInfo cameraAllocationInfo{};
+	cameraAllocationInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	cameraAllocationInfo.allocationSize = cameraMemoryRequirements.size;
+	cameraAllocationInfo.memoryTypeIndex = cameraMemoryType;
+
+	if (vkAllocateMemory(vulkan.device(), &cameraAllocationInfo, nullptr, &cameraMemory) != VK_SUCCESS)
+	{
+	    vkDestroyBuffer(vulkan.device(), cameraBuffer, nullptr);
+
+	    std::cerr << "Failed to allocate camera memory.\n";
+	    return EXIT_FAILURE;
+	}
+
+	if (vkBindBufferMemory(vulkan.device(), cameraBuffer, cameraMemory, 0) != VK_SUCCESS)
+	{
+	    vkFreeMemory(vulkan.device(), cameraMemory, nullptr);
+	    vkDestroyBuffer(vulkan.device(), cameraBuffer, nullptr);
+
+	    std::cerr << "Failed to bind camera memory.\n";
+	    return EXIT_FAILURE;
+	}
+
+	CameraGpuData initialCamera{};
+
+	initialCamera.view[0]  = 1.0f;
+	initialCamera.view[5]  = 1.0f;
+	initialCamera.view[10] = 1.0f;
+	initialCamera.view[15] = 1.0f;
+
+	// Camera at +0.25 on world X.
+	// View matrix therefore moves the world -0.25.
+	// initialCamera.view[12] = -0.25f;
+
+	initialCamera.projection[0]  = 1.0f;
+	initialCamera.projection[5]  = 1.0f;
+	initialCamera.projection[10] = 1.0f;
+	initialCamera.projection[15] = 1.0f;
+
+	void* cameraMapped = nullptr;
+
+	if (vkMapMemory(vulkan.device(), cameraMemory, 0, sizeof(CameraGpuData), 0, &cameraMapped) != VK_SUCCESS)
+	{
+	    vkFreeMemory(vulkan.device(), cameraMemory, nullptr);
+
+	    vkDestroyBuffer(vulkan.device(), cameraBuffer, nullptr);
+
+	    std::cerr << "Failed to map camera memory.\n";
+	    return EXIT_FAILURE;
+	}
+
+	std::memcpy(cameraMapped, &initialCamera, sizeof(initialCamera));
+
 	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 
-	VkDescriptorPoolSize poolSize{};
-	poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	poolSize.descriptorCount = 1;
+	VkDescriptorPoolSize poolSizes[2]{};
+	poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	poolSizes[0].descriptorCount = 1;
+	poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	poolSizes[1].descriptorCount = 1;
 
 	VkDescriptorPoolCreateInfo poolInfo{};
 	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 	poolInfo.maxSets = 1;
-	poolInfo.poolSizeCount = 1;
-	poolInfo.pPoolSizes = &poolSize;
+	poolInfo.poolSizeCount = 2;
+	poolInfo.pPoolSizes = poolSizes;
 
 	if (vkCreateDescriptorPool(vulkan.device(), &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
 	{
@@ -826,6 +943,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	vkUpdateDescriptorSets(vulkan.device(), 1, &storageWrite, 0, nullptr);
 
+	VkDescriptorBufferInfo cameraDescriptorInfo{};
+	cameraDescriptorInfo.buffer = cameraBuffer;
+	cameraDescriptorInfo.offset = 0;
+	cameraDescriptorInfo.range = sizeof(CameraGpuData);
+
+	VkWriteDescriptorSet cameraWrite{};
+	cameraWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	cameraWrite.dstSet = gaussianDescriptorSet;
+	cameraWrite.dstBinding = 1;
+	cameraWrite.dstArrayElement = 0;
+	cameraWrite.descriptorCount = 1;
+	cameraWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	cameraWrite.pBufferInfo = &cameraDescriptorInfo;
+
+	vkUpdateDescriptorSets(vulkan.device(), 1, &cameraWrite, 0, nullptr);
+
 
 	RECT clientRect{};
 
@@ -844,6 +977,64 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	{
 	    return -1;
 	}
+
+	constexpr float pi = 3.14159265358979323846f;
+
+	constexpr float fovYDegrees = 60.0f;
+	constexpr float nearPlane = 0.1f;
+	constexpr float farPlane = 100.0f;
+
+	const float aspect = static_cast<float>(swapchain.extent().width) / static_cast<float>(swapchain.extent().height);
+
+	const float fovYRadians = fovYDegrees * pi / 180.0f;
+
+	const float yScale = 1.0f / std::tan(fovYRadians * 0.5f);
+
+	const float xScale = yScale / aspect;
+	const float zScale = farPlane / (farPlane - nearPlane);
+	const float zTranslate = -(nearPlane * farPlane) / (farPlane - nearPlane);
+
+
+	CameraGpuData camera{};
+
+	//
+	// View matrix.
+	//
+	// Camera position = (0, 0, -1)
+	// Camera looks along +Z.
+	//
+	// Therefore world origin becomes camera-space z = +1.
+	//
+	camera.view[0]  = 1.0f;
+	camera.view[5]  = 1.0f;
+	camera.view[10] = 1.0f;
+	camera.view[14] = 1.0f;
+	camera.view[15] = 1.0f;
+
+
+	//
+	// Perspective projection.
+	//
+	// Row-vector convention:
+	//
+	//     clip = viewPosition * projection
+	//
+	// Produces:
+	//     clip.w = viewPosition.z
+	//
+	// and Vulkan depth in [0, 1].
+	//
+	camera.projection[0]  = xScale;
+	camera.projection[5]  = yScale;
+
+	camera.projection[10] = zScale;
+	camera.projection[11] = 1.0f;
+
+	camera.projection[14] = zTranslate;
+	camera.projection[15] = 0.0f;
+
+
+	std::memcpy(cameraMapped, &camera, sizeof(camera));
 
 	VkShaderModule gaussianVertexShaderModule = VK_NULL_HANDLE;
 
@@ -1187,6 +1378,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
 	vkFreeMemory(vulkan.device(), storageMemory, nullptr);
+
+	vkUnmapMemory(vulkan.device(), cameraMemory);
+	vkDestroyBuffer(vulkan.device(), cameraBuffer, nullptr);
+	vkFreeMemory(vulkan.device(), cameraMemory, nullptr);
 
 	vkDestroyPipeline(vulkan.device(), gaussianPipeline, nullptr);
 	vkDestroyPipelineLayout(vulkan.device(), gaussianPipelineLayout, nullptr);

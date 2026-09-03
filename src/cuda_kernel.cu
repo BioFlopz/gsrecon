@@ -34,9 +34,8 @@ __global__ void cudaGaussianSmoke(GaussianGpuData* gaussians)
     GaussianGpuData& gaussian = gaussians[index];
 
     gaussian.position[0] = index == 0 ? 0.0f : index == 1 ? -0.5f : 0.5f;
-
     gaussian.position[1] = 0.0f;
-    gaussian.position[2] = 0.0f;
+    gaussian.position[2] = index == 0 ? 0.0f : index == 1 ? 0.5f : 1.0f;
 
     gaussian.opacity = 1.0f;
 
@@ -152,6 +151,7 @@ extern "C" bool runCudaExternalGaussianSmoke(void* mappedStorage)
     }
 
     const float expectedX[kGaussianSmokeCount] = { 0.0f, -0.5f, 0.5f };
+    const float expectedZ[kGaussianSmokeCount] = { 0.0f, 0.5f, 1.0f };
 
     const float expectedColor[kGaussianSmokeCount][3] =
     {
@@ -166,7 +166,7 @@ extern "C" bool runCudaExternalGaussianSmoke(void* mappedStorage)
 
         if (gaussian.position[0] != expectedX[i] ||
             gaussian.position[1] != 0.0f ||
-            gaussian.position[2] != 0.0f ||
+            gaussian.position[2] != expectedZ[i] ||
 
             gaussian.opacity != 1.0f ||
 
