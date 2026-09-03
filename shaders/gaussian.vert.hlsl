@@ -24,7 +24,7 @@ struct VertexOutput
     float opacity        : TEXCOORD2;
 };
 
-VertexOutput main(uint vertexId : SV_VertexID)
+VertexOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
 {
     static const float2 corners[6] =
     {
@@ -37,7 +37,7 @@ VertexOutput main(uint vertexId : SV_VertexID)
         float2(-1.0f,  1.0f)
     };
 
-    const GaussianGpuData gaussian = gaussians[0];
+    const GaussianGpuData gaussian = gaussians[instanceId];
     const float2 corner = corners[vertexId];
 
     VertexOutput output;
