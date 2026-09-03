@@ -136,7 +136,7 @@ bool recordFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swa
 
 	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussianPipeline);
 	vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussianPipelineLayout, 0, 1, &gaussianDescriptorSet, 0, nullptr);
-	vkCmdDraw(frame.commandBuffer, 6, 1, 0, 0);
+	vkCmdDraw(frame.commandBuffer, 6, 3, 0, 0);
 
     vkCmdEndRendering(frame.commandBuffer);
 
@@ -591,7 +591,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    return EXIT_FAILURE;
 	}
 
-	constexpr VkDeviceSize storageBufferSize = sizeof(GaussianGpuData);
+	constexpr uint32_t gaussianCount = 3;
+	constexpr VkDeviceSize storageBufferSize = sizeof(GaussianGpuData) * gaussianCount;
 
 	VkBuffer storageBuffer = VK_NULL_HANDLE;
 
