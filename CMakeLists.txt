@@ -166,7 +166,6 @@ if(NOT EXISTS "${GSRECON_NVCC}")
 endif()
 
 
-
 #
 # Vulkan source dependencies
 #
@@ -212,6 +211,7 @@ add_custom_command(
 
     DEPENDS
         "${GSRECON_CUDA_KERNEL}"
+        "${CMAKE_SOURCE_DIR}/src/gaussian.hpp"
 
     COMMENT
         "Compiling cuda_kernel.cu"
@@ -265,6 +265,40 @@ target_include_directories(
 
 
 #
+# HLSL compilation helper
+#
+
+function(gsrecon_compile_hlsl output source profile entry_point)
+    add_custom_command(
+        OUTPUT
+            "${output}"
+
+        COMMAND
+            "${CMAKE_COMMAND}"
+            -E
+            make_directory
+            "${CMAKE_BINARY_DIR}/shaders"
+
+        COMMAND
+            "${GSRECON_DXC}"
+            -spirv
+            -T "${profile}"
+            -E "${entry_point}"
+            "${source}"
+            -Fo "${output}"
+
+        DEPENDS
+            "${source}"
+
+        COMMENT
+            "Compiling ${source}"
+
+        VERBATIM
+    )
+endfunction()
+
+
+#
 # Compute shader
 #
 
@@ -278,32 +312,17 @@ set(
     "${CMAKE_BINARY_DIR}/shaders/compute.spv"
 )
 
-add_custom_command(
-    OUTPUT
-        "${GSRECON_COMPUTE_SPV}"
-
-    COMMAND
-        "${CMAKE_COMMAND}"
-        -E
-        make_directory
-        "${CMAKE_BINARY_DIR}/shaders"
-
-    COMMAND
-        "${GSRECON_DXC}"
-        -spirv
-        -T cs_6_0
-        -E main
-        "${GSRECON_COMPUTE_SHADER}"
-        -Fo "${GSRECON_COMPUTE_SPV}"
-
-    DEPENDS
-        "${GSRECON_COMPUTE_SHADER}"
-
-    COMMENT
-        "Compiling compute.hlsl"
-
-    VERBATIM
+gsrecon_compile_hlsl(
+    "${GSRECON_COMPUTE_SPV}"
+    "${GSRECON_COMPUTE_SHADER}"
+    "cs_6_0"
+    "main"
 )
+
+
+#
+# Gaussian contract shader
+#
 
 set(
     GSRECON_GAUSSIAN_CONTRACT_SHADER
@@ -315,38 +334,69 @@ set(
     "${CMAKE_BINARY_DIR}/shaders/gaussian_contract.spv"
 )
 
-add_custom_command(
-    OUTPUT
-        "${GSRECON_GAUSSIAN_CONTRACT_SPV}"
-
-    COMMAND
-        "${CMAKE_COMMAND}"
-        -E
-        make_directory
-        "${CMAKE_BINARY_DIR}/shaders"
-
-    COMMAND
-        "${GSRECON_DXC}"
-        -spirv
-        -T cs_6_0
-        -E main
-        "${GSRECON_GAUSSIAN_CONTRACT_SHADER}"
-        -Fo "${GSRECON_GAUSSIAN_CONTRACT_SPV}"
-
-    DEPENDS
-        "${GSRECON_GAUSSIAN_CONTRACT_SHADER}"
-
-    COMMENT
-        "Compiling gaussian_contract.hlsl"
-
-    VERBATIM
+gsrecon_compile_hlsl(
+    "${GSRECON_GAUSSIAN_CONTRACT_SPV}"
+    "${GSRECON_GAUSSIAN_CONTRACT_SHADER}"
+    "cs_6_0"
+    "main"
 )
+
+
+#
+# Gaussian vertex shader
+#
+
+set(
+    GSRECON_GAUSSIAN_VERTEX_SHADER
+    "${CMAKE_SOURCE_DIR}/shaders/gaussian.vert.hlsl"
+)
+
+set(
+    GSRECON_GAUSSIAN_VERTEX_SPV
+    "${CMAKE_BINARY_DIR}/shaders/gaussian.vert.spv"
+)
+
+gsrecon_compile_hlsl(
+    "${GSRECON_GAUSSIAN_VERTEX_SPV}"
+    "${GSRECON_GAUSSIAN_VERTEX_SHADER}"
+    "vs_6_0"
+    "main"
+)
+
+
+#
+# Gaussian fragment shader
+#
+
+set(
+    GSRECON_GAUSSIAN_FRAGMENT_SHADER
+    "${CMAKE_SOURCE_DIR}/shaders/gaussian.frag.hlsl"
+)
+
+set(
+    GSRECON_GAUSSIAN_FRAGMENT_SPV
+    "${CMAKE_BINARY_DIR}/shaders/gaussian.frag.spv"
+)
+
+gsrecon_compile_hlsl(
+    "${GSRECON_GAUSSIAN_FRAGMENT_SPV}"
+    "${GSRECON_GAUSSIAN_FRAGMENT_SHADER}"
+    "ps_6_0"
+    "main"
+)
+
+
+#
+# Shader target
+#
 
 add_custom_target(
     gsrecon_shaders
     DEPENDS
         "${GSRECON_COMPUTE_SPV}"
         "${GSRECON_GAUSSIAN_CONTRACT_SPV}"
+        "${GSRECON_GAUSSIAN_VERTEX_SPV}"
+        "${GSRECON_GAUSSIAN_FRAGMENT_SPV}"
 )
 
 add_dependencies(

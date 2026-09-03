@@ -48,7 +48,7 @@ VkResult acquireSwapchainImage(VkDevice device, const VulkanSwapchain& swapchain
 
 
 
-bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkPipeline computePipeline, VkPipelineLayout computePipelineLayout, VkDescriptorSet computeDescriptorSet)
+bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkPipeline computePipeline, VkPipelineLayout computePipelineLayout, VkDescriptorSet computeDescriptorSet, VkPipeline gaussianPipeline)
 {
     if (imageIndex >= swapchain.images().size() ||
         imageIndex >= swapchain.imageViews().size())
@@ -139,6 +139,26 @@ bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain
     renderingInfo.pColorAttachments = &colorAttachment;
 
     vkCmdBeginRendering(frame.commandBuffer, &renderingInfo);
+
+	VkViewport viewport{};
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = static_cast<float>(swapchain.extent().width);
+	viewport.height = static_cast<float>(swapchain.extent().height);
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+
+	vkCmdSetViewport(frame.commandBuffer, 0, 1, &viewport);
+
+	VkRect2D scissor{};
+	scissor.offset = {0, 0};
+	scissor.extent = swapchain.extent();
+
+	vkCmdSetScissor(frame.commandBuffer, 0, 1, &scissor);
+
+	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussianPipeline);
+
+	vkCmdDraw(frame.commandBuffer, 6, 1, 0, 0);
 
     vkCmdEndRendering(frame.commandBuffer);
 
@@ -955,6 +975,164 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    return -1;
 	}
 
+	VkShaderModule gaussianVertexShaderModule = VK_NULL_HANDLE;
+
+	if (!loadShaderModule(GSRECON_SHADER_DIR "/gaussian.vert.spv", vulkan.device(), &gaussianVertexShaderModule))
+	{
+	    std::cerr << "Failed to load Gaussian vertex shader.\n";
+	    return EXIT_FAILURE;
+	}
+
+	VkShaderModule gaussianFragmentShaderModule = VK_NULL_HANDLE;
+
+	if (!loadShaderModule(GSRECON_SHADER_DIR "/gaussian.frag.spv", vulkan.device(), &gaussianFragmentShaderModule))
+	{
+	    vkDestroyShaderModule(vulkan.device(), gaussianVertexShaderModule, nullptr);
+
+	    std::cerr << "Failed to load Gaussian fragment shader.\n";
+	    return EXIT_FAILURE;
+	}
+
+
+	VkPipelineLayout gaussianPipelineLayout = VK_NULL_HANDLE;
+
+	VkPipelineLayoutCreateInfo gaussianPipelineLayoutInfo{};
+	gaussianPipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+
+	if (vkCreatePipelineLayout(vulkan.device(), &gaussianPipelineLayoutInfo, nullptr, &gaussianPipelineLayout) != VK_SUCCESS)
+	{
+	    vkDestroyShaderModule(vulkan.device(), gaussianFragmentShaderModule, nullptr);
+	    vkDestroyShaderModule(vulkan.device(), gaussianVertexShaderModule, nullptr);
+
+	    std::cerr << "Failed to create Gaussian pipeline layout.\n";
+	    return EXIT_FAILURE;
+	}
+
+
+	VkPipelineShaderStageCreateInfo gaussianShaderStages[2]{};
+	gaussianShaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	gaussianShaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	gaussianShaderStages[0].module = gaussianVertexShaderModule;
+	gaussianShaderStages[0].pName = "main";
+	gaussianShaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	gaussianShaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	gaussianShaderStages[1].module = gaussianFragmentShaderModule;
+	gaussianShaderStages[1].pName = "main";
+
+
+	VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+
+	VkPipelineViewportStateCreateInfo viewportState{};
+	viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportState.viewportCount = 1;
+	viewportState.scissorCount = 1;
+
+
+	VkPipelineRasterizationStateCreateInfo rasterization{};
+	rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	rasterization.depthClampEnable = VK_FALSE;
+	rasterization.rasterizerDiscardEnable = VK_FALSE;
+	rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+	rasterization.cullMode = VK_CULL_MODE_NONE;
+	rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rasterization.depthBiasEnable = VK_FALSE;
+	rasterization.lineWidth = 1.0f;
+
+
+	VkPipelineMultisampleStateCreateInfo multisampling{};
+	multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisampling.sampleShadingEnable = VK_FALSE;
+
+
+	VkPipelineDepthStencilStateCreateInfo depthStencil{};
+	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencil.depthTestEnable = VK_FALSE;
+	depthStencil.depthWriteEnable = VK_FALSE;
+	depthStencil.stencilTestEnable = VK_FALSE;
+
+
+	VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+	colorBlendAttachment.blendEnable = VK_TRUE;
+	colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+	colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+	colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+
+	VkPipelineColorBlendStateCreateInfo colorBlending{};
+	colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlending.logicOpEnable = VK_FALSE;
+	colorBlending.attachmentCount = 1;
+	colorBlending.pAttachments = &colorBlendAttachment;
+
+
+	VkDynamicState dynamicStates[] =
+	{
+	    VK_DYNAMIC_STATE_VIEWPORT,
+	    VK_DYNAMIC_STATE_SCISSOR
+	};
+
+	VkPipelineDynamicStateCreateInfo dynamicState{};
+	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicState.dynamicStateCount = 2;
+	dynamicState.pDynamicStates = dynamicStates;
+
+
+	const VkFormat gaussianColorFormat = swapchain.imageFormat();
+
+	VkPipelineRenderingCreateInfo renderingPipelineInfo{};
+	renderingPipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+	renderingPipelineInfo.colorAttachmentCount = 1;
+	renderingPipelineInfo.pColorAttachmentFormats = &gaussianColorFormat;
+
+
+	VkGraphicsPipelineCreateInfo gaussianPipelineInfo{};
+	gaussianPipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	gaussianPipelineInfo.pNext = &renderingPipelineInfo;
+	gaussianPipelineInfo.stageCount = 2;
+	gaussianPipelineInfo.pStages = gaussianShaderStages;
+	gaussianPipelineInfo.pVertexInputState = &vertexInputInfo;
+	gaussianPipelineInfo.pInputAssemblyState = &inputAssembly;
+	gaussianPipelineInfo.pViewportState = &viewportState;
+	gaussianPipelineInfo.pRasterizationState = &rasterization;
+	gaussianPipelineInfo.pMultisampleState = &multisampling;
+	gaussianPipelineInfo.pDepthStencilState = &depthStencil;
+	gaussianPipelineInfo.pColorBlendState = &colorBlending;
+	gaussianPipelineInfo.pDynamicState = &dynamicState;
+	gaussianPipelineInfo.layout = gaussianPipelineLayout;
+	gaussianPipelineInfo.renderPass = VK_NULL_HANDLE;
+
+
+	VkPipeline gaussianPipeline = VK_NULL_HANDLE;
+
+	if (vkCreateGraphicsPipelines(vulkan.device(), VK_NULL_HANDLE, 1, &gaussianPipelineInfo, nullptr, &gaussianPipeline) != VK_SUCCESS)
+	{
+	    vkDestroyPipelineLayout(vulkan.device(), gaussianPipelineLayout, nullptr);
+	    vkDestroyShaderModule(vulkan.device(), gaussianFragmentShaderModule, nullptr);
+	    vkDestroyShaderModule(vulkan.device(), gaussianVertexShaderModule, nullptr);
+
+	    std::cerr << "Failed to create Gaussian graphics pipeline.\n";
+	    return EXIT_FAILURE;
+	}
+
+
+	vkDestroyShaderModule(vulkan.device(), gaussianFragmentShaderModule, nullptr);
+	vkDestroyShaderModule(vulkan.device(), gaussianVertexShaderModule, nullptr);
+
+	std::cout << "Gaussian graphics pipeline: OK\n";
+
 	VulkanFrame frame;
 
 	if (!frame.init(vulkan.device(), vulkan.graphicsQueueFamily()))
@@ -1038,7 +1216,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    break;
 	}
 
-	if (!recordClearFrame(vulkan.device(), frame, swapchain, imageIndex, computePipeline, computePipelineLayout, computeDescriptorSet))
+	if (!recordClearFrame(vulkan.device(), frame, swapchain, imageIndex, computePipeline, computePipelineLayout, computeDescriptorSet, gaussianPipeline))
 	{
 	    exitCode = -1;
 	    running = false;
@@ -1138,8 +1316,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
 	vkFreeMemory(vulkan.device(), storageMemory, nullptr);
 
-	vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
+	vkDestroyPipeline(vulkan.device(), gaussianPipeline, nullptr);
+	vkDestroyPipelineLayout(vulkan.device(), gaussianPipelineLayout, nullptr);
 
+	vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
 	vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
 
 	vkDestroyDescriptorPool(vulkan.device(), descriptorPool, nullptr);
