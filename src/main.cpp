@@ -4,6 +4,7 @@ extern "C" bool runCudaExternalMemorySmoke(void* mappedStorage);
 extern "C" bool runCudaExternalGaussianWriteAsync(void* mappedStorage);
 extern "C" bool runCudaExternalGaussianSmoke(void* mappedStorage);
 extern "C" bool runCudaGaussianCovarianceSmoke();
+extern "C" bool runCudaGaussianScreenCovarianceSmoke();
 
 #include <Windows.h>
 #include <cuda_runtime_api.h>
@@ -305,6 +306,14 @@ bool selectCudaDeviceForVulkan(VkPhysicalDevice physicalDevice)
 		}
 
 		std::cout << "CUDA Gaussian 3D covariance: OK\n";
+
+		if (!runCudaGaussianScreenCovarianceSmoke())
+		{
+		    std::cerr << "CUDA Gaussian screen covariance: FAILED\n";
+		    return false;
+		}
+
+		std::cout << "CUDA Gaussian screen covariance: OK\n";
 
 #ifdef GSRECON_ENABLE_DEBUG_CONSOLE
         std::printf("CUDA device matched Vulkan: %s\n", cudaProperties.name);
