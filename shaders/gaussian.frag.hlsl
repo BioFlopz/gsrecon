@@ -1,7 +1,9 @@
 struct FragmentInput
 {
-    float4 position : SV_Position;
+    float4 position      : SV_Position;
     float2 localPosition : TEXCOORD0;
+    float3 color         : TEXCOORD1;
+    float opacity        : TEXCOORD2;
 };
 
 float4 main(FragmentInput input) : SV_Target0
@@ -10,7 +12,7 @@ float4 main(FragmentInput input) : SV_Target0
 
     const float power = -0.5f * distanceSquared;
 
-    const float alpha = exp(power);
+    const float alpha = input.opacity * exp(power);
 
-    return float4(1.0f, 0.0f, 0.0f, alpha);
+    return float4(input.color, alpha);
 }

@@ -298,27 +298,6 @@ function(gsrecon_compile_hlsl output source profile entry_point)
 endfunction()
 
 
-#
-# Compute shader
-#
-
-set(
-    GSRECON_COMPUTE_SHADER
-    "${CMAKE_SOURCE_DIR}/shaders/compute.hlsl"
-)
-
-set(
-    GSRECON_COMPUTE_SPV
-    "${CMAKE_BINARY_DIR}/shaders/compute.spv"
-)
-
-gsrecon_compile_hlsl(
-    "${GSRECON_COMPUTE_SPV}"
-    "${GSRECON_COMPUTE_SHADER}"
-    "cs_6_0"
-    "main"
-)
-
 
 #
 # Gaussian contract shader
@@ -393,7 +372,6 @@ gsrecon_compile_hlsl(
 add_custom_target(
     gsrecon_shaders
     DEPENDS
-        "${GSRECON_COMPUTE_SPV}"
         "${GSRECON_GAUSSIAN_CONTRACT_SPV}"
         "${GSRECON_GAUSSIAN_VERTEX_SPV}"
         "${GSRECON_GAUSSIAN_FRAGMENT_SPV}"
