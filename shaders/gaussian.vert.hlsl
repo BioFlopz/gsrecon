@@ -1,4 +1,3 @@
-
 struct GaussianGpuData
 {
     float3 position;
@@ -13,8 +12,17 @@ struct GaussianGpuData
     float padding1;
 };
 
+struct CameraGpuData
+{
+    row_major float4x4 view;
+    row_major float4x4 projection;
+};
+
 [[vk::binding(0, 0)]]
 StructuredBuffer<GaussianGpuData> gaussians;
+
+[[vk::binding(1, 0)]]
+ConstantBuffer<CameraGpuData> camera;
 
 struct VertexOutput
 {
@@ -38,25 +46,31 @@ VertexOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
     };
 
     const GaussianGpuData gaussian = gaussians[instanceId];
+
     const float2 corner = corners[vertexId];
+
+    const float4 worldCenter = float4(gaussian.position, 1.0f);
+
+    const float4 viewCenter = mul(worldCenter, camera.view);
+
+    const float4 clipCenter = mul(viewCenter, camera.projection);
+
+    //
+    // Temporary footprint:
+    // gaussian.scale.xy is still interpreted as NDC radius.
+    //
+    float4 clipPosition = clipCenter;
+
+    clipPosition.xy += corner * gaussian.scale.xy * clipCenter.w;
 
     VertexOutput output;
 
-    //
-    // Temporary screen-space smoke path.
-    // This is NOT the final 3D Gaussian projection.
-    //
-    const float2 screenPosition = gaussian.position.xy + corner * gaussian.scale.xy;
+    output.position = clipPosition;
 
-    output.position = float4(screenPosition, gaussian.position.z, 1.0f);
-
-    //
-    // ±2 gives the fragment shader a useful Gaussian falloff
-    // over the extent of the quad.
-    //
     output.localPosition = corner * 2.0f;
 
     output.color = gaussian.color;
+
     output.opacity = gaussian.opacity;
 
     return output;
