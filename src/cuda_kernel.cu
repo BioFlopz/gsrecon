@@ -75,6 +75,201 @@ __device__ void computeGaussianCovariance3D(const GaussianGpuData& gaussian, flo
         r22 * r22 * sz2;
 }
 
+__device__ void computeGaussianScreenCovariance(const GaussianGpuData& gaussian, const float* covariance3D, const float* view, float focalX, float focalY, float tanFovX, float tanFovY, float* covariance2D)
+{
+    //
+    // Reference:
+    // float3 t = transformPoint4x3(mean, viewmatrix);
+    //
+    float3 t =
+    {
+        view[0] * gaussian.position[0] +
+        view[4] * gaussian.position[1] +
+        view[8] * gaussian.position[2] +
+        view[12],
+
+        view[1] * gaussian.position[0] +
+        view[5] * gaussian.position[1] +
+        view[9] * gaussian.position[2] +
+        view[13],
+
+        view[2] * gaussian.position[0] +
+        view[6] * gaussian.position[1] +
+        view[10] * gaussian.position[2] +
+        view[14]
+    };
+
+    const float limitX = 1.3f * tanFovX;
+    const float limitY = 1.3f * tanFovY;
+
+    const float xOverZ = t.x / t.z;
+    const float yOverZ = t.y / t.z;
+
+    t.x = fminf(limitX, fmaxf(-limitX, xOverZ)) * t.z;
+    t.y = fminf(limitY, fmaxf(-limitY, yOverZ)) * t.z;
+
+    //
+    // Reference:
+    // glm::mat3 J = ...
+    //
+    // GLM's constructor is column-major. This C array stores the
+    // same mathematical matrix explicitly as rows.
+    //
+    const float J[3][3] =
+    {
+        {
+            focalX / t.z,
+            0.0f,
+            0.0f
+        },
+        {
+            0.0f,
+            focalY / t.z,
+            0.0f
+        },
+        {
+            -(focalX * t.x) / (t.z * t.z),
+            -(focalY * t.y) / (t.z * t.z),
+            0.0f
+        }
+    };
+
+    //
+    // Reference:
+    // glm::mat3 W = ...
+    //
+    const float W[3][3] =
+    {
+        { view[0], view[1], view[2] },
+        { view[4], view[5], view[6] },
+        { view[8], view[9], view[10] }
+    };
+
+    //
+    // Reference:
+    // T = W * J
+    //
+    float T[3][3]{};
+
+    for (unsigned int row = 0; row < 3; ++row)
+    {
+        for (unsigned int column = 0; column < 3; ++column)
+        {
+            for (unsigned int k = 0; k < 3; ++k)
+            {
+                T[row][column] +=
+                    W[row][k] *
+                    J[k][column];
+            }
+        }
+    }
+
+    //
+    // Reference:
+    // glm::mat3 Vrk = ...
+    //
+    const float Vrk[3][3] =
+    {
+        {
+            covariance3D[0],
+            covariance3D[1],
+            covariance3D[2]
+        },
+        {
+            covariance3D[1],
+            covariance3D[3],
+            covariance3D[4]
+        },
+        {
+            covariance3D[2],
+            covariance3D[4],
+            covariance3D[5]
+        }
+    };
+
+    //
+    // Reference:
+    //
+    // cov = transpose(T) * transpose(Vrk) * T
+    //
+    float vrkTransposeTimesT[3][3]{};
+
+    for (unsigned int row = 0; row < 3; ++row)
+    {
+        for (unsigned int column = 0; column < 3; ++column)
+        {
+            for (unsigned int k = 0; k < 3; ++k)
+            {
+                vrkTransposeTimesT[row][column] +=
+                    Vrk[k][row] *
+                    T[k][column];
+            }
+        }
+    }
+
+    float covariance[3][3]{};
+
+    for (unsigned int row = 0; row < 3; ++row)
+    {
+        for (unsigned int column = 0; column < 3; ++column)
+        {
+            for (unsigned int k = 0; k < 3; ++k)
+            {
+                covariance[row][column] +=
+                    T[k][row] *
+                    vrkTransposeTimesT[k][column];
+            }
+        }
+    }
+
+    //
+    // Reference low-pass filter.
+    //
+    covariance[0][0] += 0.3f;
+    covariance[1][1] += 0.3f;
+
+    covariance2D[0] = covariance[0][0];
+    covariance2D[1] = covariance[0][1];
+    covariance2D[2] = covariance[1][1];
+}
+
+
+__global__ void cudaGaussianScreenCovarianceSmoke(float* covariance2D)
+{
+    GaussianGpuData gaussian{};
+
+    gaussian.position[0] = 0.5f;
+    gaussian.position[1] = 0.25f;
+    gaussian.position[2] = 0.0f;
+
+    gaussian.scale[0] = 1.0f;
+    gaussian.scale[1] = 2.0f;
+    gaussian.scale[2] = 3.0f;
+
+    gaussian.rotation[0] = 1.0f;
+    gaussian.rotation[1] = 0.0f;
+    gaussian.rotation[2] = 0.0f;
+    gaussian.rotation[3] = 0.0f;
+
+    float covariance3D[6]{};
+
+    computeGaussianCovariance3D(gaussian, covariance3D);
+
+    //
+    // Same camera orientation as the current deterministic renderer:
+    // camera at world z = -1, looking +Z.
+    //
+    const float view[16] =
+    {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 1.0f
+    };
+
+    computeGaussianScreenCovariance(gaussian, covariance3D, view, 2.0f, 3.0f, 1.0f, 1.0f, covariance2D);
+}
+
 
 __global__ void cudaGaussianCovarianceSmoke(float* covariance)
 {
@@ -333,6 +528,62 @@ extern "C" bool runCudaGaussianCovarianceSmoke()
     for (unsigned int i = 0; i < 6; ++i)
     {
         if (hostCovariance[i] != expected[i])
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+extern "C" bool runCudaGaussianScreenCovarianceSmoke()
+{
+    float* deviceCovariance = nullptr;
+
+    if (cudaMalloc(&deviceCovariance, 3 * sizeof(float)) != cudaSuccess)
+    {
+        return false;
+    }
+
+    cudaGaussianScreenCovarianceSmoke<<<1, 1>>>(deviceCovariance);
+
+    if (cudaGetLastError() != cudaSuccess)
+    {
+        cudaFree(deviceCovariance);
+        return false;
+    }
+
+    if (cudaDeviceSynchronize() != cudaSuccess)
+    {
+        cudaFree(deviceCovariance);
+        return false;
+    }
+
+    float hostCovariance[3]{};
+
+    const cudaError_t copyResult = cudaMemcpy(hostCovariance, deviceCovariance, sizeof(hostCovariance), cudaMemcpyDeviceToHost);
+
+    cudaFree(deviceCovariance);
+
+    if (copyResult != cudaSuccess)
+    {
+        return false;
+    }
+
+    //
+    // Expected:
+    //
+    //     [13.3      6.75  ]
+    //     [ 6.75    41.3625]
+    //
+    const float expected[3] = { 13.3f, 6.75f, 41.3625f };
+
+    constexpr float epsilon = 0.0001f;
+
+    for (unsigned int i = 0; i < 3; ++i)
+    {
+        if (fabsf(hostCovariance[i] - expected[i]) > epsilon)
         {
             return false;
         }
