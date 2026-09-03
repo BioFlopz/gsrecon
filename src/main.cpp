@@ -48,7 +48,7 @@ VkResult acquireSwapchainImage(VkDevice device, const VulkanSwapchain& swapchain
 
 
 
-bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkPipeline computePipeline, VkPipelineLayout computePipelineLayout, VkDescriptorSet computeDescriptorSet, VkPipeline gaussianPipeline)
+bool recordFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkDescriptorSet gaussianDescriptorSet, VkPipeline gaussianPipeline, VkPipelineLayout gaussianPipelineLayout)
 {
     if (imageIndex >= swapchain.images().size() ||
         imageIndex >= swapchain.imageViews().size())
@@ -69,26 +69,6 @@ bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain
     {
         return false;
     }
-
-	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
-
-	vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &computeDescriptorSet, 0, nullptr);
-
-	vkCmdDispatch(frame.commandBuffer, 1, 1, 1);
-
-	VkMemoryBarrier2 storageReadbackBarrier{};
-	storageReadbackBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-	storageReadbackBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-	storageReadbackBarrier.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
-	storageReadbackBarrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
-	storageReadbackBarrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
-
-	VkDependencyInfo storageReadbackDependency{};
-	storageReadbackDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-	storageReadbackDependency.memoryBarrierCount = 1;
-	storageReadbackDependency.pMemoryBarriers = &storageReadbackBarrier;
-
-	vkCmdPipelineBarrier2(frame.commandBuffer, &storageReadbackDependency);
 
     VkImageMemoryBarrier2 toColor{};
     toColor.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -149,15 +129,13 @@ bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain
 	viewport.maxDepth = 1.0f;
 
 	vkCmdSetViewport(frame.commandBuffer, 0, 1, &viewport);
-
 	VkRect2D scissor{};
 	scissor.offset = {0, 0};
 	scissor.extent = swapchain.extent();
-
 	vkCmdSetScissor(frame.commandBuffer, 0, 1, &scissor);
 
 	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussianPipeline);
-
+	vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussianPipelineLayout, 0, 1, &gaussianDescriptorSet, 0, nullptr);
 	vkCmdDraw(frame.commandBuffer, 6, 1, 0, 0);
 
     vkCmdEndRendering(frame.commandBuffer);
@@ -190,7 +168,7 @@ bool recordClearFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain
 }
 
 
-bool submitClearFrame(VkDevice device, VkQueue graphicsQueue, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkSemaphore cudaToVulkanSemaphore, VkSemaphore vulkanToCudaSemaphore)
+bool submitFrame(VkDevice device, VkQueue graphicsQueue, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkSemaphore cudaToVulkanSemaphore, VkSemaphore vulkanToCudaSemaphore)
 {
     VkSemaphoreSubmitInfo waitInfos[2]{};
 
@@ -200,7 +178,7 @@ bool submitClearFrame(VkDevice device, VkQueue graphicsQueue, VulkanFrame& frame
 
     waitInfos[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
     waitInfos[1].semaphore = cudaToVulkanSemaphore;
-    waitInfos[1].stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    waitInfos[1].stageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
 
     VkCommandBufferSubmitInfo commandInfo{};
     commandInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
@@ -595,73 +573,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	//     return -1;
 	// }
 
-	VkShaderModule computeShaderModule = VK_NULL_HANDLE;
+	VkDescriptorSetLayoutBinding gaussianStorageBinding{};
+	gaussianStorageBinding.binding = 0;
+	gaussianStorageBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	gaussianStorageBinding.descriptorCount = 1;
+	gaussianStorageBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
-	if (!loadShaderModule(GSRECON_SHADER_DIR "/compute.spv", vulkan.device(), &computeShaderModule))
-	{
-#ifdef GSRECON_ENABLE_DEBUG_CONSOLE
-    std::fprintf(stderr, "Failed to create compute shader module.\n");
-#endif
+	VkDescriptorSetLayoutCreateInfo gaussianDescriptorSetLayoutInfo{};
+	gaussianDescriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	gaussianDescriptorSetLayoutInfo.bindingCount = 1;
+	gaussianDescriptorSetLayoutInfo.pBindings = &gaussianStorageBinding;
 
-	    return -1;
-	}
+	VkDescriptorSetLayout gaussianDescriptorSetLayout = VK_NULL_HANDLE;
 
-#ifdef GSRECON_ENABLE_DEBUG_CONSOLE
-	std::printf("Compute shader module: OK\n");
-#endif
-
-	VkDescriptorSetLayout computeDescriptorSetLayout = VK_NULL_HANDLE;
-
-	VkDescriptorSetLayoutBinding storageBinding{};
-	storageBinding.binding = 0;
-	storageBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	storageBinding.descriptorCount = 1;
-	storageBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-	VkDescriptorSetLayoutCreateInfo descriptorLayoutInfo{};
-	descriptorLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	descriptorLayoutInfo.bindingCount = 1;
-	descriptorLayoutInfo.pBindings = &storageBinding;
-
-	if (vkCreateDescriptorSetLayout(vulkan.device(), &descriptorLayoutInfo, nullptr, &computeDescriptorSetLayout) != VK_SUCCESS)
+	if (vkCreateDescriptorSetLayout(vulkan.device(), &gaussianDescriptorSetLayoutInfo, nullptr, &gaussianDescriptorSetLayout) != VK_SUCCESS)
 	{
 	    return EXIT_FAILURE;
-	}
-
-	VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
-
-	VkPipelineLayoutCreateInfo layoutInfo{};
-	layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	layoutInfo.setLayoutCount = 1;
-	layoutInfo.pSetLayouts = &computeDescriptorSetLayout;
-
-	if (vkCreatePipelineLayout(vulkan.device(), &layoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS)
-	{
-	    vkDestroyShaderModule(vulkan.device(), computeShaderModule, nullptr);
-
-	    return -1;
-	}
-
-	VkPipelineShaderStageCreateInfo stageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
-
-	stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	stageInfo.module = computeShaderModule;
-	stageInfo.pName = "main";
-
-	VkComputePipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
-
-	pipelineInfo.stage = stageInfo;
-	pipelineInfo.layout = computePipelineLayout;
-
-	VkPipeline computePipeline = VK_NULL_HANDLE;
-
-	if (vkCreateComputePipelines(vulkan.device(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline) != VK_SUCCESS)
-	{
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
-	    vkDestroyShaderModule(vulkan.device(), computeShaderModule, nullptr);
-
-	    return -1;
 	}
 
 	constexpr VkDeviceSize storageBufferSize = sizeof(GaussianGpuData);
@@ -682,10 +609,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	if (vkCreateBuffer(vulkan.device(), &bufferInfo, nullptr, &storageBuffer) != VK_SUCCESS)
 	{
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
 	    return EXIT_FAILURE;
 	}
 
@@ -718,11 +641,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	{
 	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
 
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr
-	    );
-
 	    return EXIT_FAILURE;
 	}
 
@@ -742,10 +660,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	{
 	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
 
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
 	    return EXIT_FAILURE;
 	}
 
@@ -754,10 +668,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
 
 	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
 
 	    return EXIT_FAILURE;
 	}
@@ -768,9 +678,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	{
 	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
 	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
 
 	    return EXIT_FAILURE;
 	}
@@ -786,9 +693,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	{
 	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
 	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
 
 	    return EXIT_FAILURE;
 	}
@@ -814,9 +718,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
 	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
 
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
 	    return EXIT_FAILURE;
 	}
 
@@ -839,9 +740,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
 	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
 
 	    return EXIT_FAILURE;
 	}
@@ -887,39 +785,26 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	if (vkCreateDescriptorPool(vulkan.device(), &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
 	{
 	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
-
 	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
-	    vkDestroyDescriptorSetLayout(vulkan.device(), computeDescriptorSetLayout, nullptr);
+	    vkDestroyDescriptorSetLayout(vulkan.device(), gaussianDescriptorSetLayout, nullptr);
 
 	    return EXIT_FAILURE;
 	}
 
-	VkDescriptorSet computeDescriptorSet = VK_NULL_HANDLE;
+	VkDescriptorSet gaussianDescriptorSet = VK_NULL_HANDLE;
 
 	VkDescriptorSetAllocateInfo descriptorSetInfo{};
 	descriptorSetInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	descriptorSetInfo.descriptorPool = descriptorPool;
 	descriptorSetInfo.descriptorSetCount = 1;
-	descriptorSetInfo.pSetLayouts = &computeDescriptorSetLayout;
+	descriptorSetInfo.pSetLayouts = &gaussianDescriptorSetLayout;
 
-	if (vkAllocateDescriptorSets(vulkan.device(), &descriptorSetInfo, &computeDescriptorSet) != VK_SUCCESS)
+	if (vkAllocateDescriptorSets(vulkan.device(), &descriptorSetInfo, &gaussianDescriptorSet) != VK_SUCCESS)
 	{
 	    vkDestroyDescriptorPool(vulkan.device(), descriptorPool, nullptr);
-
 	    vkFreeMemory(vulkan.device(), storageMemory, nullptr);
-
 	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
-	    vkDestroyDescriptorSetLayout(vulkan.device(), computeDescriptorSetLayout, nullptr);
+	    vkDestroyDescriptorSetLayout(vulkan.device(), gaussianDescriptorSetLayout, nullptr);
 
 	    return EXIT_FAILURE;
 	}
@@ -931,7 +816,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	VkWriteDescriptorSet storageWrite{};
 	storageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	storageWrite.dstSet = computeDescriptorSet;
+	storageWrite.dstSet = gaussianDescriptorSet;
 	storageWrite.dstBinding = 0;
 	storageWrite.dstArrayElement = 0;
 	storageWrite.descriptorCount = 1;
@@ -940,22 +825,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	vkUpdateDescriptorSets(vulkan.device(), 1, &storageWrite, 0, nullptr);
 
-	if (storageMemoryType == UINT32_MAX)
-	{
-	    vkDestroyBuffer(vulkan.device(), storageBuffer, nullptr);
-
-	    vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-
-	    vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
-	    return EXIT_FAILURE;
-	}
-
-#ifdef GSRECON_ENABLE_DEBUG_CONSOLE
-	std::printf("Compute pipeline: OK\n");
-#endif
-
-	vkDestroyShaderModule(vulkan.device(), computeShaderModule, nullptr);
 
 	RECT clientRect{};
 
@@ -998,6 +867,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	VkPipelineLayoutCreateInfo gaussianPipelineLayoutInfo{};
 	gaussianPipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	gaussianPipelineLayoutInfo.setLayoutCount = 1;
+	gaussianPipelineLayoutInfo.pSetLayouts = &gaussianDescriptorSetLayout;
 
 	if (vkCreatePipelineLayout(vulkan.device(), &gaussianPipelineLayoutInfo, nullptr, &gaussianPipelineLayout) != VK_SUCCESS)
 	{
@@ -1216,14 +1087,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    break;
 	}
 
-	if (!recordClearFrame(vulkan.device(), frame, swapchain, imageIndex, computePipeline, computePipelineLayout, computeDescriptorSet, gaussianPipeline))
+	if (!recordFrame(vulkan.device(), frame, swapchain, imageIndex, gaussianDescriptorSet, gaussianPipeline, gaussianPipelineLayout))
 	{
 	    exitCode = -1;
 	    running = false;
 	    break;
 	}
 
-	if (!submitClearFrame(vulkan.device(), vulkan.graphicsQueue(), frame, swapchain, imageIndex, cudaToVulkanSemaphore, externalSemaphore))
+	if (!submitFrame(vulkan.device(), vulkan.graphicsQueue(), frame, swapchain, imageIndex, cudaToVulkanSemaphore, externalSemaphore))
 	{
 	    exitCode = -1;
 	    running = false;
@@ -1275,7 +1146,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    const auto* gaussian = static_cast<const GaussianGpuData*>(mappedReadback);
 
 	    storageReadbackOk =
-	        gaussian->position[0] == 1.0f &&
+	        gaussian->position[0] == 0.0f &&
 	        gaussian->position[1] == 0.0f &&
 	        gaussian->position[2] == 0.0f &&
 
@@ -1319,11 +1190,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	vkDestroyPipeline(vulkan.device(), gaussianPipeline, nullptr);
 	vkDestroyPipelineLayout(vulkan.device(), gaussianPipelineLayout, nullptr);
 
-	vkDestroyPipeline(vulkan.device(), computePipeline, nullptr);
-	vkDestroyPipelineLayout(vulkan.device(), computePipelineLayout, nullptr);
-
 	vkDestroyDescriptorPool(vulkan.device(), descriptorPool, nullptr);
-	vkDestroyDescriptorSetLayout(vulkan.device(), computeDescriptorSetLayout, nullptr);
+	vkDestroyDescriptorSetLayout(vulkan.device(), gaussianDescriptorSetLayout, nullptr);
 
 	return storageReadbackOk ? EXIT_SUCCESS : EXIT_FAILURE;
 }
