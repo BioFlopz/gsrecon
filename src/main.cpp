@@ -147,9 +147,9 @@ bool recordFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swa
 	//     Gaussian 1 = middle
 	//     Gaussian 0 = nearest
 	//
-vkCmdDraw(frame.commandBuffer, 6, 1, 0, 0);
-vkCmdDraw(frame.commandBuffer, 6, 1, 0, 1);
-vkCmdDraw(frame.commandBuffer, 6, 1, 0, 2);
+	vkCmdDraw(frame.commandBuffer, 6, 1, 0, 2);
+	vkCmdDraw(frame.commandBuffer, 6, 1, 0, 1);
+	vkCmdDraw(frame.commandBuffer, 6, 1, 0, 0);
     vkCmdEndRendering(frame.commandBuffer);
 
     VkImageMemoryBarrier2 toPresent{};
