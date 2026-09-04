@@ -31,5 +31,8 @@ jobs:
       - name: Configure
         run: cmake --preset windows-msvc
 
-      - name: Build
+      - name: Build Release
         run: cmake --build --preset windows-msvc-release
+
+      - name: Build Debug
+        run: cmake --build --preset windows-msvc-debug
