@@ -140,8 +140,16 @@ bool recordFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swa
 
 	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussianPipeline);
 	vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussianPipelineLayout, 0, 1, &gaussianDescriptorSet, 0, nullptr);
-	vkCmdDraw(frame.commandBuffer, 6, 3, 0, 0);
-
+	// Source-over alpha blending requires back-to-front submission.
+	//
+	// Current deterministic smoke scene:
+	//     Gaussian 2 = farthest
+	//     Gaussian 1 = middle
+	//     Gaussian 0 = nearest
+	//
+vkCmdDraw(frame.commandBuffer, 6, 1, 0, 0);
+vkCmdDraw(frame.commandBuffer, 6, 1, 0, 1);
+vkCmdDraw(frame.commandBuffer, 6, 1, 0, 2);
     vkCmdEndRendering(frame.commandBuffer);
 
     VkImageMemoryBarrier2 toPresent{};
@@ -1379,7 +1387,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	        gaussian->position[1] == 0.0f &&
 	        gaussian->position[2] == 0.0f &&
 
-	        gaussian->opacity == 1.0f &&
+	        gaussian->opacity == 0.5f &&
 
 	        gaussian->scale[0] == 0.25f &&
 	        gaussian->scale[1] == 0.25f &&
