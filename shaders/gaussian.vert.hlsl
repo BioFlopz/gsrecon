@@ -267,6 +267,26 @@ VertexOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
 
     const float4 worldCenter = float4(gaussian.position, 1.0f);
     const float4 viewCenter = mul(worldCenter, camera.view);
+
+    //
+    // Reference near-camera visibility test.
+    //
+    // Reject Gaussian centers that are behind or too close
+    // to the camera before covariance projection.
+    //
+
+    if (viewCenter.z <= 0.2f)
+    {
+        VertexOutput output;
+
+        output.position = float4(2.0f, 2.0f, 0.0f, 1.0f);
+        output.pixelOffset = float2(0.0f, 0.0f);
+        output.conicOpacity = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        output.color = float3(0.0f, 0.0f, 0.0f);
+
+        return output;
+    }
+
     const float4 clipCenter = mul(viewCenter, camera.projection);
 
 
