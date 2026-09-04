@@ -233,6 +233,73 @@ __device__ void computeGaussianScreenCovariance(const GaussianGpuData& gaussian,
     covariance2D[2] = covariance[1][1];
 }
 
+__device__ bool computeGaussianConic(const float* covariance2D, float* conic)
+{
+    //
+    // Reference:
+    //
+    // float det = (cov.x * cov.z - cov.y * cov.y);
+    //
+    // if (det == 0.0f)
+    //     return;
+    //
+    // float det_inv = 1.f / det;
+    //
+    // float3 conic =
+    // {
+    //     cov.z * det_inv,
+    //     -cov.y * det_inv,
+    //     cov.x * det_inv
+    // };
+    //
+
+    const float determinant =
+        covariance2D[0] * covariance2D[2] -
+        covariance2D[1] * covariance2D[1];
+
+    if (determinant == 0.0f)
+    {
+        return false;
+    }
+
+    const float determinantInverse = 1.0f / determinant;
+
+    conic[0] = covariance2D[2] * determinantInverse;
+    conic[1] = -covariance2D[1] * determinantInverse;
+    conic[2] = covariance2D[0] * determinantInverse;
+
+    return true;
+}
+
+
+__device__ int computeGaussianProjectedRadius(const float* covariance2D, float determinant)
+{
+    //
+    // Reference:
+    //
+    // float mid = 0.5f * (cov.x + cov.z);
+    // float lambda1 =
+    //     mid + sqrt(max(0.1f, mid * mid - det));
+    // float lambda2 =
+    //     mid - sqrt(max(0.1f, mid * mid - det));
+    //
+    // float my_radius =
+    //     ceil(3.f * sqrt(max(lambda1, lambda2)));
+    //
+    // gsrecon uses fmaxf for the CUDA scalar max operation.
+    //
+
+    const float mid = 0.5f * (covariance2D[0] + covariance2D[2]);
+
+    const float eigenvalueOffset = sqrtf(fmaxf(0.1f, mid * mid - determinant));
+
+    const float lambda1 = mid + eigenvalueOffset;
+
+    const float lambda2 = mid - eigenvalueOffset;
+
+    return static_cast<int>(ceilf(3.0f * sqrtf(fmaxf(lambda1, lambda2))));
+}
+
 
 __global__ void cudaGaussianScreenCovarianceSmoke(float* covariance2D)
 {
@@ -268,6 +335,57 @@ __global__ void cudaGaussianScreenCovarianceSmoke(float* covariance2D)
     };
 
     computeGaussianScreenCovariance(gaussian, covariance3D, view, 2.0f, 3.0f, 1.0f, 1.0f, covariance2D);
+}
+
+
+__global__ void cudaGaussianConicSmoke(float* conic, int* valid)
+{
+    //
+    // This is the already-proven deterministic screen covariance
+    // from cudaGaussianScreenCovarianceSmoke:
+    //
+    // [13.3   6.75  ]
+    // [ 6.75 41.3625]
+    //
+
+    const float covariance2D[3] =
+    {
+        13.3f,
+        6.75f,
+        41.3625f
+    };
+
+    *valid = computeGaussianConic(covariance2D, conic) ? 1 : 0;
+}
+
+
+__global__ void cudaGaussianProjectedRadiusSmoke(int* radius, int* valid)
+{
+    const float covariance2D[3] =
+    {
+        13.3f,
+        6.75f,
+        41.3625f
+    };
+
+    float conic[3]{};
+
+    const bool conicValid = computeGaussianConic(covariance2D, conic);
+
+    if (!conicValid)
+    {
+        *valid = 0;
+        *radius = 0;
+        return;
+    }
+
+    const float determinant =
+        covariance2D[0] * covariance2D[2] -
+        covariance2D[1] * covariance2D[1];
+
+    *radius = computeGaussianProjectedRadius(covariance2D, determinant);
+
+    *valid = 1;
 }
 
 
@@ -590,4 +708,153 @@ extern "C" bool runCudaGaussianScreenCovarianceSmoke()
     }
 
     return true;
+}
+
+
+extern "C" bool runCudaGaussianConicSmoke()
+{
+    float* deviceConic = nullptr;
+
+    if (cudaMalloc(
+            &deviceConic,
+            3 * sizeof(float)) != cudaSuccess)
+    {
+        return false;
+    }
+
+    int* deviceValid = nullptr;
+
+    if (cudaMalloc(
+            &deviceValid,
+            sizeof(int)) != cudaSuccess)
+    {
+        cudaFree(deviceConic);
+        return false;
+    }
+
+    cudaGaussianConicSmoke<<<1, 1>>>(deviceConic, deviceValid);
+
+    if (cudaGetLastError() != cudaSuccess)
+    {
+        cudaFree(deviceValid);
+        cudaFree(deviceConic);
+
+        return false;
+    }
+
+    if (cudaDeviceSynchronize() != cudaSuccess)
+    {
+        cudaFree(deviceValid);
+        cudaFree(deviceConic);
+
+        return false;
+    }
+
+    float hostConic[3]{};
+    int hostValid = 0;
+
+    const cudaError_t conicCopyResult = cudaMemcpy(hostConic, deviceConic, sizeof(hostConic), cudaMemcpyDeviceToHost);
+
+    const cudaError_t validCopyResult = cudaMemcpy(&hostValid, deviceValid, sizeof(hostValid), cudaMemcpyDeviceToHost);
+
+    cudaFree(deviceValid);
+    cudaFree(deviceConic);
+
+    if (conicCopyResult != cudaSuccess ||
+        validCopyResult != cudaSuccess)
+    {
+        return false;
+    }
+
+    if (hostValid != 1)
+    {
+        return false;
+    }
+
+    //
+    // For:
+    //
+    // covariance =
+    // [13.3   6.75  ]
+    // [ 6.75 41.3625]
+    //
+    // determinant = 504.55875
+    //
+    // inverse covariance / conic:
+    //
+    // [ 0.08197757  -0.01337803 ]
+    // [-0.01337803   0.02635967 ]
+    //
+
+    const float expected[3] =
+    {
+        0.08197757f,
+        -0.01337803f,
+        0.02635967f
+    };
+
+    constexpr float epsilon = 0.000001f;
+
+    for (unsigned int i = 0; i < 3; ++i)
+    {
+        if (fabsf(hostConic[i] - expected[i]) > epsilon)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+
+
+extern "C" bool runCudaGaussianProjectedRadiusSmoke()
+{
+    int* deviceRadius = nullptr;
+
+    if (cudaMalloc(&deviceRadius, sizeof(int)) != cudaSuccess)
+    {
+        return false;
+    }
+
+    int* deviceValid = nullptr;
+
+    if (cudaMalloc(&deviceValid, sizeof(int)) != cudaSuccess)
+    {
+        cudaFree(deviceRadius);
+        return false;
+    }
+
+    cudaGaussianProjectedRadiusSmoke<<<1, 1>>>(deviceRadius, deviceValid);
+
+    if (cudaGetLastError() != cudaSuccess)
+    {
+        cudaFree(deviceValid);
+        cudaFree(deviceRadius);
+        return false;
+    }
+
+    if (cudaDeviceSynchronize() != cudaSuccess)
+    {
+        cudaFree(deviceValid);
+        cudaFree(deviceRadius);
+        return false;
+    }
+
+    int hostRadius = 0;
+    int hostValid = 0;
+
+    const cudaError_t radiusCopyResult = cudaMemcpy(&hostRadius, deviceRadius, sizeof(hostRadius), cudaMemcpyDeviceToHost);
+
+    const cudaError_t validCopyResult = cudaMemcpy(&hostValid, deviceValid, sizeof(hostValid), cudaMemcpyDeviceToHost);
+
+    cudaFree(deviceValid);
+    cudaFree(deviceRadius);
+
+    return
+        radiusCopyResult == cudaSuccess &&
+        validCopyResult == cudaSuccess &&
+        hostValid == 1 &&
+        hostRadius == 20;
 }

@@ -5,6 +5,8 @@ extern "C" bool runCudaExternalGaussianWriteAsync(void* mappedStorage);
 extern "C" bool runCudaExternalGaussianSmoke(void* mappedStorage);
 extern "C" bool runCudaGaussianCovarianceSmoke();
 extern "C" bool runCudaGaussianScreenCovarianceSmoke();
+extern "C" bool runCudaGaussianConicSmoke();
+extern "C" bool runCudaGaussianProjectedRadiusSmoke();
 
 #include <Windows.h>
 #include <cuda_runtime_api.h>
@@ -314,6 +316,22 @@ bool selectCudaDeviceForVulkan(VkPhysicalDevice physicalDevice)
 		}
 
 		std::cout << "CUDA Gaussian screen covariance: OK\n";
+
+		if (!runCudaGaussianConicSmoke())
+		{
+		    std::cerr << "CUDA Gaussian conic: FAILED\n";
+		    return false;
+		}
+
+		std::cout << "CUDA Gaussian conic: OK\n";
+
+		if (!runCudaGaussianProjectedRadiusSmoke())
+		{
+		    std::cerr << "CUDA Gaussian projected radius: FAILED\n";
+		    return false;
+		}
+
+		std::cout << "CUDA Gaussian projected radius: OK\n";
 
 #ifdef GSRECON_ENABLE_DEBUG_CONSOLE
         std::printf("CUDA device matched Vulkan: %s\n", cudaProperties.name);
@@ -1044,12 +1062,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	//
 	camera.projection[0]  = xScale;
 	camera.projection[5]  = yScale;
-
 	camera.projection[10] = zScale;
 	camera.projection[11] = 1.0f;
-
 	camera.projection[14] = zTranslate;
 	camera.projection[15] = 0.0f;
+
+	camera.viewportSize[0] = static_cast<float>(swapchain.extent().width);
+	camera.viewportSize[1] = static_cast<float>(swapchain.extent().height);
 
 
 	std::memcpy(cameraMapped, &camera, sizeof(camera));
