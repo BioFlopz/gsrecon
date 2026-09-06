@@ -322,6 +322,28 @@ gsrecon_compile_hlsl(
 
 
 #
+# Gaussian preprocess shader
+#
+
+set(
+    GSRECON_GAUSSIAN_PREPROCESS_SHADER
+    "${CMAKE_SOURCE_DIR}/shaders/gaussian_preprocess.hlsl"
+)
+
+set(
+    GSRECON_GAUSSIAN_PREPROCESS_SPV
+    "${CMAKE_BINARY_DIR}/shaders/gaussian_preprocess.spv"
+)
+
+gsrecon_compile_hlsl(
+    "${GSRECON_GAUSSIAN_PREPROCESS_SPV}"
+    "${GSRECON_GAUSSIAN_PREPROCESS_SHADER}"
+    "cs_6_0"
+    "main"
+)
+
+
+#
 # Gaussian vertex shader
 #
 
@@ -375,6 +397,7 @@ add_custom_target(
         "${GSRECON_GAUSSIAN_CONTRACT_SPV}"
         "${GSRECON_GAUSSIAN_VERTEX_SPV}"
         "${GSRECON_GAUSSIAN_FRAGMENT_SPV}"
+        "${GSRECON_GAUSSIAN_PREPROCESS_SPV}"
 )
 
 add_dependencies(
