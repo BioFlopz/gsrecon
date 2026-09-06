@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <type_traits>
+#include <cstdint>
 
 struct alignas(16) GaussianGpuData
 {
@@ -29,3 +30,19 @@ static_assert(offsetof(GaussianGpuData, opacity) == 12);
 static_assert(offsetof(GaussianGpuData, scale) == 16);
 static_assert(offsetof(GaussianGpuData, rotation) == 32);
 static_assert(offsetof(GaussianGpuData, color) == 48);
+
+struct alignas(16) GaussianPreprocessData
+{
+    float viewDepth;
+    std::uint32_t visible;
+    float padding[2];
+};
+
+static_assert(std::is_standard_layout_v<GaussianPreprocessData>);
+static_assert(std::is_trivially_copyable_v<GaussianPreprocessData>);
+
+static_assert(sizeof(GaussianPreprocessData) == 16);
+static_assert(alignof(GaussianPreprocessData) == 16);
+
+static_assert(offsetof(GaussianPreprocessData, viewDepth) == 0);
+static_assert(offsetof(GaussianPreprocessData, visible) == 4);

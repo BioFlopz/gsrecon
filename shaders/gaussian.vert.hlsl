@@ -21,12 +21,21 @@ struct CameraGpuData
     float2 padding;
 };
 
+struct GaussianPreprocessData
+{
+    float viewDepth;
+    uint visible;
+    float2 padding;
+};
+
 [[vk::binding(0, 0)]]
 StructuredBuffer<GaussianGpuData> gaussians;
 
 [[vk::binding(1, 0)]]
 ConstantBuffer<CameraGpuData> camera;
 
+[[vk::binding(2, 0)]]
+StructuredBuffer<GaussianPreprocessData> preprocessData;
 
 struct Covariance3D
 {
@@ -262,6 +271,7 @@ VertexOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
     };
 
     const GaussianGpuData gaussian = gaussians[instanceId];
+    const GaussianPreprocessData preprocess = preprocessData[instanceId];
     const float2 corner = corners[vertexId];
 
 
@@ -275,7 +285,7 @@ VertexOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
     // to the camera before covariance projection.
     //
 
-    if (viewCenter.z <= 0.2f)
+    if (preprocess.visible == 0u)
     {
         VertexOutput output;
 

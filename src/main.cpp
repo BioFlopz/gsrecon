@@ -52,7 +52,9 @@ VkResult acquireSwapchainImage(VkDevice device, const VulkanSwapchain& swapchain
 
 
 
-bool recordFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkDescriptorSet gaussianDescriptorSet, VkPipeline gaussianPipeline, VkPipelineLayout gaussianPipelineLayout)
+bool recordFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swapchain, uint32_t imageIndex, VkDescriptorSet gaussianDescriptorSet,
+	VkPipeline gaussianPipeline, VkPipelineLayout gaussianPipelineLayout, VkPipeline gaussianPreprocessPipeline, VkPipelineLayout gaussianPreprocessPipelineLayout,
+	uint32_t gaussianCount)
 {
     if (imageIndex >= swapchain.images().size() ||
         imageIndex >= swapchain.imageViews().size())
@@ -73,6 +75,27 @@ bool recordFrame(VkDevice device, VulkanFrame& frame, const VulkanSwapchain& swa
     {
         return false;
     }
+
+	vkCmdBindPipeline(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, gaussianPreprocessPipeline);
+	vkCmdBindDescriptorSets(frame.commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, gaussianPreprocessPipelineLayout, 0, 1, &gaussianDescriptorSet, 0, nullptr);
+	vkCmdPushConstants(frame.commandBuffer, gaussianPreprocessPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t), &gaussianCount);
+
+	constexpr uint32_t preprocessWorkgroupSize = 64;
+	const uint32_t preprocessGroupCount = (gaussianCount + preprocessWorkgroupSize - 1) / preprocessWorkgroupSize;
+	vkCmdDispatch(frame.commandBuffer, preprocessGroupCount, 1, 1);
+
+	VkMemoryBarrier2 preprocessConsumers{};
+	preprocessConsumers.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+	preprocessConsumers.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+	preprocessConsumers.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+	preprocessConsumers.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_HOST_BIT;
+	preprocessConsumers.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_HOST_READ_BIT;
+
+	VkDependencyInfo preprocessConsumersDependency{};
+	preprocessConsumersDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+	preprocessConsumersDependency.memoryBarrierCount = 1;
+	preprocessConsumersDependency.pMemoryBarriers = &preprocessConsumers;
+	vkCmdPipelineBarrier2(frame.commandBuffer, &preprocessConsumersDependency);
 
     VkImageMemoryBarrier2 toColor{};
     toColor.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -190,7 +213,7 @@ bool submitFrame(VkDevice device, VkQueue graphicsQueue, VulkanFrame& frame, con
 
     waitInfos[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
     waitInfos[1].semaphore = cudaToVulkanSemaphore;
-    waitInfos[1].stageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    waitInfos[1].stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
 
     VkCommandBufferSubmitInfo commandInfo{};
     commandInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
@@ -621,23 +644,30 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	gaussianStorageBinding.binding = 0;
 	gaussianStorageBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	gaussianStorageBinding.descriptorCount = 1;
-	gaussianStorageBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	gaussianStorageBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
 	VkDescriptorSetLayoutBinding cameraBinding{};
 	cameraBinding.binding = 1;
 	cameraBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	cameraBinding.descriptorCount = 1;
-	cameraBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	cameraBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+
+	VkDescriptorSetLayoutBinding preprocessBinding{};
+	preprocessBinding.binding = 2;
+	preprocessBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	preprocessBinding.descriptorCount = 1;
+	preprocessBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
 
 	VkDescriptorSetLayoutBinding gaussianBindings[] =
 	{
 	    gaussianStorageBinding,
-	    cameraBinding
+	    cameraBinding,
+	    preprocessBinding
 	};
 
 	VkDescriptorSetLayoutCreateInfo gaussianDescriptorSetLayoutInfo{};
 	gaussianDescriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	gaussianDescriptorSetLayoutInfo.bindingCount = 2;
+	gaussianDescriptorSetLayoutInfo.bindingCount = 3;
 	gaussianDescriptorSetLayoutInfo.pBindings = gaussianBindings;
 
 	VkDescriptorSetLayout gaussianDescriptorSetLayout = VK_NULL_HANDLE;
@@ -930,11 +960,82 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	std::memcpy(cameraMapped, &initialCamera, sizeof(initialCamera));
 
+	const VkDeviceSize preprocessBufferSize = sizeof(GaussianPreprocessData) * gaussianCount;
+
+	VkBuffer preprocessBuffer = VK_NULL_HANDLE;
+
+	VkBufferCreateInfo preprocessBufferCreateInfo{};
+	preprocessBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	preprocessBufferCreateInfo.size = preprocessBufferSize;
+	preprocessBufferCreateInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	preprocessBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	if (vkCreateBuffer(vulkan.device(), &preprocessBufferCreateInfo, nullptr, &preprocessBuffer) != VK_SUCCESS)
+	{
+	    std::cerr << "Failed to create Gaussian preprocess buffer.\n";
+	    return EXIT_FAILURE;
+	}
+
+	VkMemoryRequirements preprocessMemoryRequirements{};
+	vkGetBufferMemoryRequirements(vulkan.device(), preprocessBuffer, &preprocessMemoryRequirements);
+
+	constexpr VkMemoryPropertyFlags preprocessRequiredMemoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+	uint32_t preprocessMemoryType = UINT32_MAX;
+
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
+	{
+	    const bool supportedByBuffer = (preprocessMemoryRequirements.memoryTypeBits & (1u << i)) != 0;
+
+	    const bool hasRequiredProperties = (memoryProperties.memoryTypes[i].propertyFlags & preprocessRequiredMemoryProperties) == preprocessRequiredMemoryProperties;
+
+	    if (supportedByBuffer && hasRequiredProperties)
+	    {
+	        preprocessMemoryType = i;
+	        break;
+	    }
+	}
+
+	if (preprocessMemoryType == UINT32_MAX)
+	{
+	    vkDestroyBuffer(vulkan.device(), preprocessBuffer, nullptr);
+
+	    std::cerr << "No suitable Gaussian preprocess memory type.\n";
+
+	    return EXIT_FAILURE;
+	}
+
+	VkDeviceMemory preprocessMemory = VK_NULL_HANDLE;
+
+	VkMemoryAllocateInfo preprocessAllocationInfo{};
+	preprocessAllocationInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	preprocessAllocationInfo.allocationSize = preprocessMemoryRequirements.size;
+	preprocessAllocationInfo.memoryTypeIndex = preprocessMemoryType;
+
+	if (vkAllocateMemory(vulkan.device(), &preprocessAllocationInfo, nullptr, &preprocessMemory) != VK_SUCCESS)
+	{
+	    vkDestroyBuffer(vulkan.device(), preprocessBuffer, nullptr);
+
+	    std::cerr << "Failed to allocate Gaussian preprocess memory.\n";
+
+	    return EXIT_FAILURE;
+	}
+
+	if (vkBindBufferMemory(vulkan.device(), preprocessBuffer, preprocessMemory, 0) != VK_SUCCESS)
+	{
+	    vkFreeMemory(vulkan.device(), preprocessMemory, nullptr);
+	    vkDestroyBuffer(vulkan.device(), preprocessBuffer, nullptr);
+
+	    std::cerr << "Failed to bind Gaussian preprocess memory.\n";
+
+	    return EXIT_FAILURE;
+	}
+
 	VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 
 	VkDescriptorPoolSize poolSizes[2]{};
 	poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	poolSizes[0].descriptorCount = 1;
+	poolSizes[0].descriptorCount = 2;
 	poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	poolSizes[1].descriptorCount = 1;
 
@@ -1002,6 +1103,84 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	cameraWrite.pBufferInfo = &cameraDescriptorInfo;
 
 	vkUpdateDescriptorSets(vulkan.device(), 1, &cameraWrite, 0, nullptr);
+
+	VkDescriptorBufferInfo preprocessDescriptorInfo{};
+	preprocessDescriptorInfo.buffer = preprocessBuffer;
+	preprocessDescriptorInfo.offset = 0;
+	preprocessDescriptorInfo.range = preprocessBufferSize;
+
+	VkWriteDescriptorSet preprocessWrite{};
+	preprocessWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	preprocessWrite.dstSet = gaussianDescriptorSet;
+	preprocessWrite.dstBinding = 2;
+	preprocessWrite.dstArrayElement = 0;
+	preprocessWrite.descriptorCount = 1;
+	preprocessWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	preprocessWrite.pBufferInfo = &preprocessDescriptorInfo;
+
+	vkUpdateDescriptorSets(vulkan.device(), 1, &preprocessWrite, 0, nullptr);
+
+	VkShaderModule gaussianPreprocessShaderModule = VK_NULL_HANDLE;
+
+	if (!loadShaderModule(GSRECON_SHADER_DIR "/gaussian_preprocess.spv", vulkan.device(), &gaussianPreprocessShaderModule))
+	{
+	    std::cerr << "Failed to load Gaussian preprocess shader.\n";
+
+	    return EXIT_FAILURE;
+	}
+
+	VkPushConstantRange preprocessPushConstantRange{};
+	preprocessPushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	preprocessPushConstantRange.offset = 0;
+	preprocessPushConstantRange.size = sizeof(uint32_t);
+
+	VkPipelineLayout gaussianPreprocessPipelineLayout = VK_NULL_HANDLE;
+
+	VkPipelineLayoutCreateInfo gaussianPreprocessPipelineLayoutInfo{};
+
+	gaussianPreprocessPipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+
+	gaussianPreprocessPipelineLayoutInfo.setLayoutCount = 1;
+	gaussianPreprocessPipelineLayoutInfo.pSetLayouts = &gaussianDescriptorSetLayout;
+
+	gaussianPreprocessPipelineLayoutInfo.pushConstantRangeCount = 1;
+	gaussianPreprocessPipelineLayoutInfo.pPushConstantRanges = &preprocessPushConstantRange;
+
+	if (vkCreatePipelineLayout(vulkan.device(), &gaussianPreprocessPipelineLayoutInfo, nullptr, &gaussianPreprocessPipelineLayout) != VK_SUCCESS)
+	{
+	    vkDestroyShaderModule(vulkan.device(), gaussianPreprocessShaderModule, nullptr);
+
+	    std::cerr << "Failed to create Gaussian preprocess pipeline layout.\n";
+
+	    return EXIT_FAILURE;
+	}
+
+	VkPipelineShaderStageCreateInfo gaussianPreprocessStage{};
+	gaussianPreprocessStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	gaussianPreprocessStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	gaussianPreprocessStage.module = gaussianPreprocessShaderModule;
+	gaussianPreprocessStage.pName = "main";
+
+	VkComputePipelineCreateInfo gaussianPreprocessPipelineInfo{};
+	gaussianPreprocessPipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	gaussianPreprocessPipelineInfo.stage = gaussianPreprocessStage;
+	gaussianPreprocessPipelineInfo.layout = gaussianPreprocessPipelineLayout;
+
+
+	VkPipeline gaussianPreprocessPipeline = VK_NULL_HANDLE;
+
+	if (vkCreateComputePipelines(vulkan.device(), VK_NULL_HANDLE, 1, &gaussianPreprocessPipelineInfo, nullptr, &gaussianPreprocessPipeline) != VK_SUCCESS)
+	{
+	    vkDestroyPipelineLayout(vulkan.device(), gaussianPreprocessPipelineLayout, nullptr);
+	    vkDestroyShaderModule(vulkan.device(), gaussianPreprocessShaderModule, nullptr);
+
+	    std::cerr << "Failed to create Gaussian preprocess pipeline.\n";
+
+	    return EXIT_FAILURE;
+	}
+
+	vkDestroyShaderModule(vulkan.device(), gaussianPreprocessShaderModule, nullptr);
+	std::cout << "Gaussian preprocess pipeline: OK\n";
 
 
 	RECT clientRect{};
@@ -1324,7 +1503,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	    break;
 	}
 
-	if (!recordFrame(vulkan.device(), frame, swapchain, imageIndex, gaussianDescriptorSet, gaussianPipeline, gaussianPipelineLayout))
+	if (!recordFrame(vulkan.device(), frame, swapchain, imageIndex, gaussianDescriptorSet, gaussianPipeline, gaussianPipelineLayout, gaussianPreprocessPipeline, gaussianPreprocessPipelineLayout, gaussianCount))
 	{
 	    exitCode = -1;
 	    running = false;
@@ -1428,11 +1607,52 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	vkDestroyBuffer(vulkan.device(), cameraBuffer, nullptr);
 	vkFreeMemory(vulkan.device(), cameraMemory, nullptr);
 
+	bool preprocessReadbackOk = false;
+
+	void* preprocessMapped = nullptr;
+
+	if (vkMapMemory(vulkan.device(), preprocessMemory, 0, preprocessBufferSize, 0, &preprocessMapped) == VK_SUCCESS)
+	{
+	    const auto* preprocess = static_cast<const GaussianPreprocessData*>(preprocessMapped);
+
+	    preprocessReadbackOk =
+	        preprocess[0].viewDepth == 1.0f &&
+	        preprocess[0].visible == 1u &&
+
+	        preprocess[1].viewDepth == 1.5f &&
+	        preprocess[1].visible == 1u &&
+
+	        preprocess[2].viewDepth == 2.0f &&
+	        preprocess[2].visible == 1u;
+
+	    std::cout
+	        << "Gaussian preprocess depths: "
+	        << preprocess[0].viewDepth << ' '
+	        << preprocess[1].viewDepth << ' '
+	        << preprocess[2].viewDepth << '\n';
+
+	    vkUnmapMemory(vulkan.device(), preprocessMemory);
+	}
+	if (preprocessReadbackOk)
+	{
+	    std::cout << "Gaussian preprocess: OK\n";
+	}
+	else
+	{
+	    std::cerr << "Gaussian preprocess: FAILED\n";
+	}
+
+	vkDestroyBuffer(vulkan.device(), preprocessBuffer, nullptr);
+	vkFreeMemory(vulkan.device(), preprocessMemory, nullptr);
+
 	vkDestroyPipeline(vulkan.device(), gaussianPipeline, nullptr);
 	vkDestroyPipelineLayout(vulkan.device(), gaussianPipelineLayout, nullptr);
+
+	vkDestroyPipeline(vulkan.device(), gaussianPreprocessPipeline, nullptr);
+	vkDestroyPipelineLayout(vulkan.device(), gaussianPreprocessPipelineLayout, nullptr);
 
 	vkDestroyDescriptorPool(vulkan.device(), descriptorPool, nullptr);
 	vkDestroyDescriptorSetLayout(vulkan.device(), gaussianDescriptorSetLayout, nullptr);
 
-	return storageReadbackOk ? EXIT_SUCCESS : EXIT_FAILURE;
+	return storageReadbackOk && preprocessReadbackOk ? EXIT_SUCCESS : EXIT_FAILURE;
 }
