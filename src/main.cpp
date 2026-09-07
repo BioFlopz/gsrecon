@@ -1615,6 +1615,47 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	{
 	    const auto* preprocess = static_cast<const GaussianPreprocessData*>(preprocessMapped);
 
+		const float focalX = 0.5f * camera.viewportSize[0] * camera.projection[0];
+
+		const float focalY = 0.5f * camera.viewportSize[1] * camera.projection[5];
+
+		const auto footprintMatches = [&](const GaussianPreprocessData& value, float viewDepth)
+		{
+		    constexpr float variance = 0.0625f;
+
+		    const float jx = focalX / viewDepth;
+		    const float jy = focalY / viewDepth;
+
+		    const float covX = variance * jx * jx + 0.3f;
+		    const float covY = variance * jy * jy + 0.3f;
+
+		    const float expectedConicX = 1.0f / covX;
+		    const float expectedConicY = 0.0f;
+		    const float expectedConicZ = 1.0f / covY;
+
+		    const float determinant = covX * covY;
+		    const float mid = 0.5f * (covX + covY);
+
+		    const float eigenvalueOffset = std::sqrt(std::fmax(0.1f, mid * mid - determinant));
+
+		    const float lambda1 = mid + eigenvalueOffset;
+		    const float lambda2 = mid - eigenvalueOffset;
+
+		    const float expectedRadius = std::ceil(3.0f * std::sqrt(std::fmax(lambda1, lambda2)));
+
+		    const auto closeEnough = [](float a, float b)
+		    {
+		        return std::fabs(a - b) <=
+		            1.0e-6f + 1.0e-4f * std::fabs(b);
+		    };
+
+		    return
+		        closeEnough(value.conicRadius[0], expectedConicX) &&
+		        closeEnough(value.conicRadius[1], expectedConicY) &&
+		        closeEnough(value.conicRadius[2], expectedConicZ) &&
+		        value.conicRadius[3] == expectedRadius;
+		};
+
 		preprocessReadbackOk =
 		    preprocess[0].viewDepth == 1.0f &&
 		    preprocess[0].visible == 1u &&
@@ -1624,6 +1665,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		    preprocess[0].covariance0[3] == 0.0625f &&
 		    preprocess[0].covariance1[0] == 0.0f &&
 		    preprocess[0].covariance1[1] == 0.0625f &&
+			footprintMatches(preprocess[0], 1.0f) &&
 
 		    preprocess[1].viewDepth == 1.5f &&
 		    preprocess[1].visible == 1u &&
@@ -1633,6 +1675,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		    preprocess[1].covariance0[3] == 0.0625f &&
 		    preprocess[1].covariance1[0] == 0.0f &&
 		    preprocess[1].covariance1[1] == 0.0625f &&
+		    footprintMatches(preprocess[1], 1.5f) &&
 
 		    preprocess[2].viewDepth == 2.0f &&
 		    preprocess[2].visible == 1u &&
@@ -1641,7 +1684,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		    preprocess[2].covariance0[2] == 0.0f &&
 		    preprocess[2].covariance0[3] == 0.0625f &&
 		    preprocess[2].covariance1[0] == 0.0f &&
-		    preprocess[2].covariance1[1] == 0.0625f;
+		    preprocess[2].covariance1[1] == 0.0625f &&
+		    footprintMatches(preprocess[2], 2.0f);
 
 	    std::cout
 	        << "Gaussian preprocess depths: "

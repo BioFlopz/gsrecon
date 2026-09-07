@@ -39,13 +39,16 @@ struct alignas(16) GaussianPreprocessData
 
     float covariance0[4]; // xx, xy, xz, yy
     float covariance1[4]; // yz, zz, padding, padding
+
+    float conicRadius[4]; // conic.x, conic.y, conic.z, radiusPixels
 };
 
 static_assert(std::is_standard_layout_v<GaussianPreprocessData>);
 static_assert(std::is_trivially_copyable_v<GaussianPreprocessData>);
-static_assert(sizeof(GaussianPreprocessData) == 48);
+static_assert(sizeof(GaussianPreprocessData) == 64);
 static_assert(alignof(GaussianPreprocessData) == 16);
 static_assert(offsetof(GaussianPreprocessData, viewDepth) == 0);
 static_assert(offsetof(GaussianPreprocessData, visible) == 4);
 static_assert(offsetof(GaussianPreprocessData, covariance0) == 16);
 static_assert(offsetof(GaussianPreprocessData, covariance1) == 32);
+static_assert(offsetof(GaussianPreprocessData, conicRadius) == 48);
