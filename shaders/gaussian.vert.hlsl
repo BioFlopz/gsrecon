@@ -26,6 +26,9 @@ struct GaussianPreprocessData
     float viewDepth;
     uint visible;
     float2 padding;
+
+    float4 covariance0;
+    float4 covariance1;
 };
 
 [[vk::binding(0, 0)]]
@@ -47,70 +50,6 @@ struct Covariance3D
     float zz;
 };
 
-
-Covariance3D computeGaussianCovariance3D(GaussianGpuData gaussian)
-{
-    //
-    // GaussianGpuData quaternion order:
-    //
-    //     w, x, y, z
-    //
-    // Same convention as the already-proven CUDA implementation.
-    //
-
-    const float w = gaussian.rotation.x;
-    const float x = gaussian.rotation.y;
-    const float y = gaussian.rotation.z;
-    const float z = gaussian.rotation.w;
-
-    const float r00 = 1.0f - 2.0f * (y * y + z * z);
-    const float r01 = 2.0f * (x * y - w * z);
-    const float r02 = 2.0f * (x * z + w * y);
-    const float r10 = 2.0f * (x * y + w * z);
-    const float r11 = 1.0f - 2.0f * (x * x + z * z);
-    const float r12 = 2.0f * (y * z - w * x);
-    const float r20 = 2.0f * (x * z - w * y);
-    const float r21 = 2.0f * (y * z + w * x);
-    const float r22 = 1.0f - 2.0f * (x * x + y * y);
-
-    const float sx2 = gaussian.scale.x * gaussian.scale.x;
-    const float sy2 = gaussian.scale.y * gaussian.scale.y;
-    const float sz2 = gaussian.scale.z * gaussian.scale.z;
-
-    Covariance3D covariance;
-
-    covariance.xx =
-        r00 * r00 * sx2 +
-        r01 * r01 * sy2 +
-        r02 * r02 * sz2;
-
-    covariance.xy =
-        r00 * r10 * sx2 +
-        r01 * r11 * sy2 +
-        r02 * r12 * sz2;
-
-    covariance.xz =
-        r00 * r20 * sx2 +
-        r01 * r21 * sy2 +
-        r02 * r22 * sz2;
-
-    covariance.yy =
-        r10 * r10 * sx2 +
-        r11 * r11 * sy2 +
-        r12 * r12 * sz2;
-
-    covariance.yz =
-        r10 * r20 * sx2 +
-        r11 * r21 * sy2 +
-        r12 * r22 * sz2;
-
-    covariance.zz =
-        r20 * r20 * sx2 +
-        r21 * r21 * sy2 +
-        r22 * r22 * sz2;
-
-    return covariance;
-}
 
 
 float3 computeGaussianScreenCovariance(GaussianGpuData gaussian, Covariance3D covariance3D)
@@ -304,7 +243,15 @@ VertexOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
     // Project the Gaussian's real 3D covariance into screen space.
     //
 
-    const Covariance3D covariance3D = computeGaussianCovariance3D(gaussian);
+    Covariance3D covariance3D;
+
+    covariance3D.xx = preprocess.covariance0.x;
+    covariance3D.xy = preprocess.covariance0.y;
+    covariance3D.xz = preprocess.covariance0.z;
+    covariance3D.yy = preprocess.covariance0.w;
+
+    covariance3D.yz = preprocess.covariance1.x;
+    covariance3D.zz = preprocess.covariance1.y;
 
     const float3 covariance2D = computeGaussianScreenCovariance(gaussian, covariance3D);
     float3 conic;

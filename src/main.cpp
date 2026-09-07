@@ -1625,6 +1625,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	        preprocess[2].viewDepth == 2.0f &&
 	        preprocess[2].visible == 1u;
 
+			preprocess[0].covariance0[0] == 0.0625f &&
+			preprocess[0].covariance0[1] == 0.0f &&
+			preprocess[0].covariance0[2] == 0.0f &&
+			preprocess[0].covariance0[3] == 0.0625f &&
+			preprocess[0].covariance1[0] == 0.0f &&
+			preprocess[0].covariance1[1] == 0.0625f &&
+
 	    std::cout
 	        << "Gaussian preprocess depths: "
 	        << preprocess[0].viewDepth << ' '
