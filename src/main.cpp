@@ -1615,22 +1615,33 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	{
 	    const auto* preprocess = static_cast<const GaussianPreprocessData*>(preprocessMapped);
 
-	    preprocessReadbackOk =
-	        preprocess[0].viewDepth == 1.0f &&
-	        preprocess[0].visible == 1u &&
+		preprocessReadbackOk =
+		    preprocess[0].viewDepth == 1.0f &&
+		    preprocess[0].visible == 1u &&
+		    preprocess[0].covariance0[0] == 0.0625f &&
+		    preprocess[0].covariance0[1] == 0.0f &&
+		    preprocess[0].covariance0[2] == 0.0f &&
+		    preprocess[0].covariance0[3] == 0.0625f &&
+		    preprocess[0].covariance1[0] == 0.0f &&
+		    preprocess[0].covariance1[1] == 0.0625f &&
 
-	        preprocess[1].viewDepth == 1.5f &&
-	        preprocess[1].visible == 1u &&
+		    preprocess[1].viewDepth == 1.5f &&
+		    preprocess[1].visible == 1u &&
+		    preprocess[1].covariance0[0] == 0.0625f &&
+		    preprocess[1].covariance0[1] == 0.0f &&
+		    preprocess[1].covariance0[2] == 0.0f &&
+		    preprocess[1].covariance0[3] == 0.0625f &&
+		    preprocess[1].covariance1[0] == 0.0f &&
+		    preprocess[1].covariance1[1] == 0.0625f &&
 
-	        preprocess[2].viewDepth == 2.0f &&
-	        preprocess[2].visible == 1u;
-
-			preprocess[0].covariance0[0] == 0.0625f &&
-			preprocess[0].covariance0[1] == 0.0f &&
-			preprocess[0].covariance0[2] == 0.0f &&
-			preprocess[0].covariance0[3] == 0.0625f &&
-			preprocess[0].covariance1[0] == 0.0f &&
-			preprocess[0].covariance1[1] == 0.0625f &&
+		    preprocess[2].viewDepth == 2.0f &&
+		    preprocess[2].visible == 1u &&
+		    preprocess[2].covariance0[0] == 0.0625f &&
+		    preprocess[2].covariance0[1] == 0.0f &&
+		    preprocess[2].covariance0[2] == 0.0f &&
+		    preprocess[2].covariance0[3] == 0.0625f &&
+		    preprocess[2].covariance1[0] == 0.0f &&
+		    preprocess[2].covariance1[1] == 0.0625f;
 
 	    std::cout
 	        << "Gaussian preprocess depths: "
