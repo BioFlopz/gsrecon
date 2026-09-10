@@ -41,6 +41,8 @@ struct GaussianPreprocessData
     float4 covariance1;
 
     float4 conicRadius;
+
+    float4 clipCenter;
 };
 
 struct PreprocessPushConstants
@@ -271,8 +273,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     const float4 worldCenter = float4(gaussians[index].position, 1.0f);
-
     const float4 viewCenter = mul(worldCenter, camera.view);
+    const float4 clipCenter = mul(viewCenter, camera.projection);
 
     GaussianPreprocessData output;
 
@@ -296,6 +298,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     output.conicRadius = float4(conic, radiusPixels);
+    output.clipCenter = clipCenter;
 
     preprocessData[index] = output;
 }

@@ -1656,6 +1656,24 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		        value.conicRadius[3] == expectedRadius;
 		};
 
+		const auto clipCenterMatches = [&](const GaussianPreprocessData& value, float viewDepth)
+		{
+		    const float expectedClipZ = viewDepth * camera.projection[10] + camera.projection[14];
+		    const float expectedClipW = viewDepth * camera.projection[11] + camera.projection[15];
+
+		    const auto closeEnough = [](float a, float b)
+		    {
+		        return std::fabs(a - b) <=
+		            1.0e-6f + 1.0e-4f * std::fabs(b);
+		    };
+
+		    return
+		        closeEnough(value.clipCenter[0], 0.0f) &&
+		        closeEnough(value.clipCenter[1], 0.0f) &&
+		        closeEnough(value.clipCenter[2], expectedClipZ) &&
+		        closeEnough(value.clipCenter[3], expectedClipW);
+		};
+
 		preprocessReadbackOk =
 		    preprocess[0].viewDepth == 1.0f &&
 		    preprocess[0].visible == 1u &&
@@ -1666,6 +1684,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		    preprocess[0].covariance1[0] == 0.0f &&
 		    preprocess[0].covariance1[1] == 0.0625f &&
 			footprintMatches(preprocess[0], 1.0f) &&
+			clipCenterMatches(preprocess[0], 1.0f) &&
 
 		    preprocess[1].viewDepth == 1.5f &&
 		    preprocess[1].visible == 1u &&
@@ -1676,6 +1695,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		    preprocess[1].covariance1[0] == 0.0f &&
 		    preprocess[1].covariance1[1] == 0.0625f &&
 		    footprintMatches(preprocess[1], 1.5f) &&
+		    clipCenterMatches(preprocess[1], 1.5f) &&
 
 		    preprocess[2].viewDepth == 2.0f &&
 		    preprocess[2].visible == 1u &&
@@ -1685,7 +1705,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		    preprocess[2].covariance0[3] == 0.0625f &&
 		    preprocess[2].covariance1[0] == 0.0f &&
 		    preprocess[2].covariance1[1] == 0.0625f &&
-		    footprintMatches(preprocess[2], 2.0f);
+		    footprintMatches(preprocess[2], 2.0f) &&
+		    clipCenterMatches(preprocess[2], 2.0f);
 
 	    std::cout
 	        << "Gaussian preprocess depths: "
