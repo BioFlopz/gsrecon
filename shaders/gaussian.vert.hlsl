@@ -31,6 +31,8 @@ struct GaussianPreprocessData
     float4 covariance1;
 
     float4 conicRadius;
+
+    float4 clipCenter;
 };
 
 [[vk::binding(0, 0)]]
@@ -78,9 +80,6 @@ VertexOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
     const float2 corner = corners[vertexId];
 
 
-    const float4 worldCenter = float4(gaussian.position, 1.0f);
-    const float4 viewCenter = mul(worldCenter, camera.view);
-
     //
     // Reference near-camera visibility test.
     //
@@ -100,8 +99,7 @@ VertexOutput main(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
         return output;
     }
 
-    const float4 clipCenter = mul(viewCenter, camera.projection);
-
+    const float4 clipCenter = preprocess.clipCenter;
 
     const float3 conic = preprocess.conicRadius.xyz;
     const float radiusPixels = preprocess.conicRadius.w;
